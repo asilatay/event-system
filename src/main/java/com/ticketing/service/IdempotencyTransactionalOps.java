@@ -44,7 +44,7 @@ public class IdempotencyTransactionalOps {
         IdempotencyKey record = repository.findById(id).orElseThrow();
         record.setStatus(IdempotencyKey.IdempotencyStatus.COMPLETED);
         record.setResponseBody(responseJson);
-        record.setResponseStatus(200);
+        record.setResponseStatus(200); // placeholder only: never read back, see IdempotencyKey#responseStatus
         repository.save(record);
     }
 

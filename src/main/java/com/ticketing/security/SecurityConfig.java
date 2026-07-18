@@ -45,6 +45,9 @@ public class SecurityConfig {
         return new BCryptPasswordEncoder();
     }
 
+    // Not on the live login path: AuthService.login authenticates directly via
+    // PasswordEncoder.matches, bypassing AuthenticationManager entirely. Kept here
+    // for any consumer that wants to authenticate through the standard Spring Security flow.
     @Bean
     public DaoAuthenticationProvider authenticationProvider() {
         DaoAuthenticationProvider provider = new DaoAuthenticationProvider(userDetailsService);
@@ -89,6 +92,8 @@ public class SecurityConfig {
         CorsConfiguration configuration = new CorsConfiguration();
         // Demo default: same-origin tooling (Swagger UI) + local dev frontend.
         // Restrict to real origins via config before any production deployment.
+        // Must be *OriginPatterns, not the plain setAllowedOrigins: Spring rejects a
+        // wildcard origin combined with allowCredentials(true) on the exact-match setter.
         configuration.setAllowedOriginPatterns(List.of("http://localhost:*"));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Idempotency-Key"));

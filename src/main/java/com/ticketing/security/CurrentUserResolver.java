@@ -28,6 +28,8 @@ public class CurrentUserResolver {
             throw new org.springframework.security.access.AccessDeniedException("Not authenticated");
         }
         String email = auth.getName();
+        // AccessDeniedException (403), not 401: a token with a valid signature for a
+        // user deleted since it was issued is treated as a permissions gap here.
         return userRepository.findByEmail(email)
                 .orElseThrow(() -> new org.springframework.security.access.AccessDeniedException("Unknown user"));
     }

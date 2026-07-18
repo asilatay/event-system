@@ -70,6 +70,8 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         }
 
         if (bucket != null && !bucket.tryConsume(1)) {
+            // Can't throw RateLimitExceededException + let GlobalExceptionHandler map it:
+            // this filter runs before the DispatcherServlet, outside @RestControllerAdvice's reach.
             response.setStatus(429);
             response.setContentType("application/problem+json");
             response.getWriter().write("""
@@ -92,6 +94,8 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     /** Prefer authenticated principal once available; fall back to remote IP pre-auth. */
     private String clientKey(HttpServletRequest request) {
         var auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        // auth is never null here: Spring Security's AnonymousAuthenticationFilter always
+        // fills the context with a principal literally named "anonymousUser" pre-login.
         if (auth != null && auth.isAuthenticated() && !"anonymousUser".equals(auth.getPrincipal())) {
             return "user:" + auth.getName();
         }

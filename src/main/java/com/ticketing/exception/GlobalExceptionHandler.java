@@ -87,6 +87,8 @@ public class GlobalExceptionHandler {
         return pd;
     }
 
+    // Not exercised by the current login flow (AuthService.login throws
+    // InvalidCredentialsException instead); kept for any AuthenticationManager-based path.
     @ExceptionHandler(BadCredentialsException.class)
     public ProblemDetail handleBadCredentials(BadCredentialsException ex) {
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, "Invalid email or password");

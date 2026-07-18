@@ -108,6 +108,8 @@ public class JwtService {
         return parseAndValidate(token).get("email", String.class);
     }
 
+    // Comes back as a List even though generateAccessToken puts in a Set: JJWT/Jackson
+    // serialize the claim as a JSON array, and JSON arrays always deserialize to List.
     @SuppressWarnings("unchecked")
     public List<String> extractRoles(String token) {
         return (List<String>) parseAndValidate(token).get("roles", List.class);

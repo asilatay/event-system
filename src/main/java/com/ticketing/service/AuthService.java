@@ -51,6 +51,8 @@ public class AuthService {
             throw new DuplicateEmailException(request.email());
         }
 
+        // Unrecognized role names aren't caught by @NotEmpty on the DTO; they fail here
+        // with an IllegalArgumentException, surfaced as a generic 400 by GlobalExceptionHandler.
         Set<Role> roles = request.roles().stream()
                 .map(String::toUpperCase)
                 .map(Role::valueOf)

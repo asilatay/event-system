@@ -37,6 +37,7 @@ public class IdempotencyKey {
     @Lob
     private String responseBody;
 
+    /** Written on completion but never read back; the controller always re-wraps replays with its own status. */
     private Integer responseStatus;
 
     @Enumerated(EnumType.STRING)

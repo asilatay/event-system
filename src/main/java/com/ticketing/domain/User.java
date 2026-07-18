@@ -29,6 +29,8 @@ public class User {
     @Column(nullable = false)
     private String passwordHash;
 
+    // EAGER is required: CustomUserDetailsService.loadUserByUsername reads this
+    // collection with no open transaction; LAZY would throw on session close.
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "user_roles", joinColumns = @JoinColumn(name = "user_id"))
     @Enumerated(EnumType.STRING)
