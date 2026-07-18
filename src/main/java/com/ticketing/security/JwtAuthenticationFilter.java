@@ -43,7 +43,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
-        String token = header.substring(7);
+        String token = header.substring(7); // strip the "Bearer " prefix (7 chars)
         try {
             if (!jwtService.isValid(token)) {
                 filterChain.doFilter(request, response);
