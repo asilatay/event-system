@@ -1,0 +1,894 @@
+{
+  "info": {
+    "_postman_id": "6f2b7a1a-6c1e-4b9a-9d2f-3a8e6c0d4f10",
+    "name": "Secure Ticketing & Reservation API",
+    "description": "End-to-end collection for the Secure Ticketing & Reservation API (Spring Boot 4 / Java 21).\n\nFolders are ordered to be run top-to-bottom with Postman's Collection Runner:\n1. Auth — register/login/refresh, plus a couple of deliberate failure cases (duplicate email, bad password).\n2. Events — full draft -> publish -> discover lifecycle, plus a 403 example showing role enforcement.\n3. Reservations — create (idempotent) -> confirm -> cancel, plus idempotency replay and a missing-key 400 example.\n4. Security & Error Examples — unauthenticated and tampered-token requests.\n\nSeed accounts (created automatically by DataSeeder on startup, see README \"Seed users\"):\n- admin@ticketing.local / Admin123! (ADMIN)\n- organizer@ticketing.local / Organizer123! (ORGANIZER)\n- customer@ticketing.local / Customer123! (CUSTOMER)\n\nRun the three \"Login\" requests first (or hit Runner on the whole collection) so the bearer-token variables are populated before the Events/Reservations folders execute.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080", "type": "string" },
+    { "key": "adminAccessToken", "value": "", "type": "string" },
+    { "key": "organizerAccessToken", "value": "", "type": "string" },
+    { "key": "customerAccessToken", "value": "", "type": "string" },
+    { "key": "refreshToken", "value": "", "type": "string" },
+    { "key": "tamperedToken", "value": "", "type": "string" },
+    { "key": "eventId", "value": "", "type": "string" },
+    { "key": "eventVersion", "value": "", "type": "string" },
+    { "key": "organizerUserId", "value": "", "type": "string" },
+    { "key": "reservationId", "value": "", "type": "string" },
+    { "key": "idempotencyKey", "value": "", "type": "string" },
+    { "key": "eventStartsAt", "value": "", "type": "string" },
+    { "key": "eventEndsAt", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "1. Auth",
+      "description": "Heads up: /api/auth/** is rate-limited to 5 requests/minute by default (app.rate-limit.auth-endpoints in application.yml, ADR-04). This folder has 7 requests, so running it back-to-back with Collection Runner's default (no delay) will get a 429 on the later ones — verified live. Set Runner's \"Delay\" to ~15000ms, or just run requests manually with pauses.",
+      "item": [
+        {
+          "name": "Register - New Organizer",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('newOrganizerEmail', `organizer-${Date.now()}@ticketing.local`);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201 Created', () => pm.response.to.have.status(201));",
+                  "pm.test('Location header points at the new user', () => pm.response.headers.has('Location'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{newOrganizerEmail}}\",\n  \"password\": \"NewOrg123!\",\n  \"roles\": [\"ORGANIZER\"]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "register"]
+            },
+            "description": "Registers a brand-new organizer account. Email is timestamp-suffixed so this request is safely re-runnable without hitting the duplicate-email conflict."
+          },
+          "response": []
+        },
+        {
+          "name": "Register - Duplicate Email (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 409 Conflict', () => pm.response.to.have.status(409));",
+                  "pm.test('Problem type is DUPLICATE_EMAIL', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.title).to.eql('DUPLICATE_EMAIL');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"organizer@ticketing.local\",\n  \"password\": \"AnyPassword123!\",\n  \"roles\": [\"ORGANIZER\"]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "register"]
+            },
+            "description": "organizer@ticketing.local is one of the three seeded accounts, so this always conflicts — demonstrates DuplicateEmailException -> 409."
+          },
+          "response": []
+        },
+        {
+          "name": "Login - Admin (seeded)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Response has an access token', () => pm.expect(body.accessToken).to.be.a('string'));",
+                  "pm.collectionVariables.set('adminAccessToken', body.accessToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@ticketing.local\",\n  \"password\": \"Admin123!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "description": "Logs in as the seeded ADMIN account and stores the access token in {{adminAccessToken}} for use by the Admin-only requests below."
+          },
+          "response": []
+        },
+        {
+          "name": "Login - Organizer (seeded)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Response has an access + refresh token', () => {",
+                  "    pm.expect(body.accessToken).to.be.a('string');",
+                  "    pm.expect(body.refreshToken).to.be.a('string');",
+                  "});",
+                  "pm.collectionVariables.set('organizerAccessToken', body.accessToken);",
+                  "pm.collectionVariables.set('refreshToken', body.refreshToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"organizer@ticketing.local\",\n  \"password\": \"Organizer123!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "description": "Logs in as the seeded ORGANIZER account. Stores {{organizerAccessToken}} (used by the Events folder) and {{refreshToken}} (used by Refresh Token below)."
+          },
+          "response": []
+        },
+        {
+          "name": "Login - Customer (seeded)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Response has an access token', () => pm.expect(body.accessToken).to.be.a('string'));",
+                  "pm.collectionVariables.set('customerAccessToken', body.accessToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"customer@ticketing.local\",\n  \"password\": \"Customer123!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "description": "Logs in as the seeded CUSTOMER account and stores the access token in {{customerAccessToken}} for use by the Reservations folder."
+          },
+          "response": []
+        },
+        {
+          "name": "Login - Wrong Password (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 401 Unauthorized', () => pm.response.to.have.status(401));",
+                  "pm.test('Problem type is INVALID_CREDENTIALS', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.title).to.eql('INVALID_CREDENTIALS');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"customer@ticketing.local\",\n  \"password\": \"WrongPassword1!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "description": "Same error for a wrong password as for a nonexistent email (see AuthService.login) — prevents email enumeration."
+          },
+          "response": []
+        },
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Response has a rotated token pair', () => {",
+                  "    pm.expect(body.accessToken).to.be.a('string');",
+                  "    pm.expect(body.refreshToken).to.be.a('string');",
+                  "});",
+                  "pm.collectionVariables.set('organizerAccessToken', body.accessToken);",
+                  "pm.collectionVariables.set('refreshToken', body.refreshToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/refresh",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "refresh"]
+            },
+            "description": "Exchanges the organizer's refresh token for a new access+refresh pair. The old refresh token is revoked immediately (rotation) — replaying it afterwards would now return 401."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. Events",
+      "item": [
+        {
+          "name": "Create Event (Organizer)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const now = Date.now();",
+                  "pm.collectionVariables.set('eventStartsAt', new Date(now + 10 * 24 * 60 * 60 * 1000).toISOString());",
+                  "pm.collectionVariables.set('eventEndsAt', new Date(now + 11 * 24 * 60 * 60 * 1000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201 Created', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test('Event is a draft (unpublished)', () => pm.expect(body.published).to.eql(false));",
+                  "pm.collectionVariables.set('eventId', body.id);",
+                  "pm.collectionVariables.set('eventVersion', body.version);",
+                  "pm.collectionVariables.set('organizerUserId', body.ownerId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{organizerAccessToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Spring Boot Conference\",\n  \"venue\": \"Tech Hall\",\n  \"startsAt\": \"{{eventStartsAt}}\",\n  \"endsAt\": \"{{eventEndsAt}}\",\n  \"capacity\": 100\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/events",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "events"]
+            },
+            "description": "Creates a draft event owned by the authenticated organizer. Not visible in public discovery until published. Stores {{eventId}}, {{eventVersion}} and {{organizerUserId}} for later requests."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Event - Forbidden for Customer (403)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const now = Date.now();",
+                  "pm.collectionVariables.set('eventStartsAt', new Date(now + 10 * 24 * 60 * 60 * 1000).toISOString());",
+                  "pm.collectionVariables.set('eventEndsAt', new Date(now + 11 * 24 * 60 * 60 * 1000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 403 Forbidden', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{customerAccessToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Hack Attempt\",\n  \"venue\": \"Nowhere\",\n  \"startsAt\": \"{{eventStartsAt}}\",\n  \"endsAt\": \"{{eventEndsAt}}\",\n  \"capacity\": 10\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/events",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "events"]
+            },
+            "description": "@PreAuthorize(\"hasAnyRole('ORGANIZER', 'ADMIN')\") rejects a CUSTOMER-only principal before the method body even runs."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Event (Organizer, owner)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Capacity was updated', () => pm.expect(body.capacity).to.eql(120));",
+                  "pm.collectionVariables.set('eventVersion', body.version);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{organizerAccessToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Spring Boot Conference (Updated)\",\n  \"venue\": \"Tech Hall - Main Auditorium\",\n  \"startsAt\": \"{{eventStartsAt}}\",\n  \"endsAt\": \"{{eventEndsAt}}\",\n  \"capacity\": 120,\n  \"version\": {{eventVersion}}\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/events/{{eventId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "events", "{{eventId}}"]
+            },
+            "description": "version must match the event's current row version (optimistic locking) — a stale version fails with a 409/conflict, not a silent overwrite."
+          },
+          "response": []
+        },
+        {
+          "name": "Publish Event (Organizer)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Event is now published', () => pm.expect(body.published).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{organizerAccessToken}}", "type": "string" }]
+            },
+            "body": { "mode": "raw", "raw": "" },
+            "url": {
+              "raw": "{{baseUrl}}/api/events/{{eventId}}/publish",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "events", "{{eventId}}", "publish"]
+            },
+            "description": "Flips the draft event to published, making it visible in /api/events/public."
+          },
+          "response": []
+        },
+        {
+          "name": "List My Events (Organizer)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Response is an array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{organizerAccessToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/events",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "events"]
+            },
+            "description": "An ORGANIZER calling this with no ownerId param sees only events they own."
+          },
+          "response": []
+        },
+        {
+          "name": "List Events by Owner (Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Response is an array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/events?ownerId={{organizerUserId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "events"],
+              "query": [{ "key": "ownerId", "value": "{{organizerUserId}}" }]
+            },
+            "description": "Only ADMIN may filter by an arbitrary ownerId; an ORGANIZER is restricted to their own events regardless of this param (see EventService.listEvents)."
+          },
+          "response": []
+        },
+        {
+          "name": "Discover Public Events (no auth)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Published event is visible', () => {",
+                  "    const body = pm.response.json();",
+                  "    const ids = body.map(e => e.id);",
+                  "    pm.expect(ids).to.include(pm.collectionVariables.get('eventId'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/events/public",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "events", "public"]
+            },
+            "description": "No Authorization header at all — this endpoint is intentionally open (see SecurityConfig permitAll rules)."
+          },
+          "response": []
+        },
+        {
+          "name": "Discover Public Events - Filtered",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/events/public?q=Spring&from={{eventStartsAt}}&to={{eventEndsAt}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "events", "public"],
+              "query": [
+                { "key": "q", "value": "Spring" },
+                { "key": "from", "value": "{{eventStartsAt}}" },
+                { "key": "to", "value": "{{eventEndsAt}}" }
+              ]
+            },
+            "description": "Same public endpoint, but narrowed by a title/venue substring (q) and a date window (from/to)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. Reservations",
+      "item": [
+        {
+          "name": "Create Reservation (Customer)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('idempotencyKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201 Created', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test('Reservation is PENDING', () => pm.expect(body.status).to.eql('PENDING'));",
+                  "pm.collectionVariables.set('reservationId', body.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{idempotencyKey}}", "description": "Client-generated unique key. Retrying with the same key + same body replays this exact result instead of double-booking." }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{customerAccessToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"seats\": 2\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/events/{{eventId}}/reservations",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "events", "{{eventId}}", "reservations"]
+            },
+            "description": "Generates a fresh Idempotency-Key (stored in {{idempotencyKey}}) and reserves 2 seats. Requires the event to be published first."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Reservation - Replay Same Idempotency Key",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201 Created (replayed)', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test('Same reservation id as the original request', () => {",
+                  "    pm.expect(body.id).to.eql(pm.collectionVariables.get('reservationId'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{idempotencyKey}}" }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{customerAccessToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"seats\": 2\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/events/{{eventId}}/reservations",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "events", "{{eventId}}", "reservations"]
+            },
+            "description": "Exact same Idempotency-Key + exact same body as the previous request. Returns the ORIGINAL reservation (id unchanged) instead of creating a second one or double-deducting seats (ADR-06)."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Reservation - Same Key, Different Body (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 409 Conflict', () => pm.response.to.have.status(409));",
+                  "pm.test('Problem type is IDEMPOTENCY_KEY_CONFLICT', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.title).to.eql('IDEMPOTENCY_KEY_CONFLICT');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{idempotencyKey}}" }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{customerAccessToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"seats\": 5\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/events/{{eventId}}/reservations",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "events", "{{eventId}}", "reservations"]
+            },
+            "description": "Reusing {{idempotencyKey}} but changing the request body (seats 2 -> 5) is rejected as a conflict rather than silently replayed or double-processed."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Reservation - Missing Idempotency Key (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400 Bad Request', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{customerAccessToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"seats\": 1\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/events/{{eventId}}/reservations",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "events", "{{eventId}}", "reservations"]
+            },
+            "description": "No Idempotency-Key header at all -> IdempotencyKeyRequiredException -> 400. Every reservation-creation call must carry one."
+          },
+          "response": []
+        },
+        {
+          "name": "Confirm Reservation (Customer)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Reservation is CONFIRMED', () => pm.expect(body.status).to.eql('CONFIRMED'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{customerAccessToken}}", "type": "string" }]
+            },
+            "body": { "mode": "raw", "raw": "" },
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations/{{reservationId}}/confirm",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "reservations", "{{reservationId}}", "confirm"]
+            },
+            "description": "Only the reservation's owner (or an admin) may confirm it (see ReservationService.assertReservationOwnerOrAdmin)."
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel Reservation (Customer)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Reservation is CANCELLED', () => pm.expect(body.status).to.eql('CANCELLED'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{customerAccessToken}}", "type": "string" }]
+            },
+            "body": { "mode": "raw", "raw": "" },
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations/{{reservationId}}/cancel",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "reservations", "{{reservationId}}", "cancel"]
+            },
+            "description": "Cancels the (now-confirmed) reservation and releases its 2 seats back to the event's available pool. Cancel is allowed from either PENDING or CONFIRMED."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. Security & Error Examples",
+      "item": [
+        {
+          "name": "Access Protected Endpoint Without Token (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 401 Unauthorized', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/events",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "events"]
+            },
+            "description": "No Authorization header at all against a protected endpoint -> RestAuthenticationEntryPoint returns 401."
+          },
+          "response": []
+        },
+        {
+          "name": "Access Protected Endpoint With Tampered Token (401)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const token = pm.collectionVariables.get('customerAccessToken') || '';",
+                  "pm.collectionVariables.set('tamperedToken', token.slice(0, -3) + 'xyz');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 401 Unauthorized', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{tamperedToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/events",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "events"]
+            },
+            "description": "Last 3 characters of a valid customer token are mangled by the pre-request script, breaking the HMAC signature -> JwtException -> unauthenticated -> 401."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
