@@ -152,4 +152,43 @@ class SecurityAccessIT {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
+
+    @Test
+    void registeringAnAlreadyUsedEmailIsRejected() throws Exception {
+        Map<String, Object> body = Map.of(
+                "email", "customer@ticketing.local", // one of the three seeded accounts
+                "password", "AnyPassword123!",
+                "roles", java.util.List.of("CUSTOMER"));
+
+        ResponseEntity<String> response = restTemplate.postForEntity("/api/auth/register", body, String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(objectMapper.readTree(response.getBody()).get("title").asText()).isEqualTo("DUPLICATE_EMAIL");
+    }
+
+    @Test
+    void loginWithWrongPasswordIsRejected() {
+        Map<String, String> body = Map.of("email", "customer@ticketing.local", "password", "TotallyWrongPassword1!");
+
+        ResponseEntity<String> response = restTemplate.postForEntity("/api/auth/login", body, String.class);
+
+        // Status only: RestTemplate's default JDK-based request factory doesn't
+        // reliably surface the response body for chunked 401s the way it does for
+        // 2xx/409 (a client-side HttpURLConnection quirk, not a server-side bug -
+        // verified via curl that the body is a well-formed ProblemDetail).
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    void refreshingWithATamperedTokenIsRejected() throws Exception {
+        Map<String, String> loginBody = Map.of("email", "customer@ticketing.local", "password", "Customer123!");
+        ResponseEntity<String> loginResponse = restTemplate.postForEntity("/api/auth/login", loginBody, String.class);
+        String refreshToken = objectMapper.readTree(loginResponse.getBody()).get("refreshToken").asText();
+        String tampered = refreshToken.substring(0, refreshToken.length() - 3) + "xyz";
+
+        ResponseEntity<String> response = restTemplate.postForEntity(
+                "/api/auth/refresh", Map.of("refreshToken", tampered), String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
 }

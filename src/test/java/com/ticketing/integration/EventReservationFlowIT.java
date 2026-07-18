@@ -119,6 +119,18 @@ class EventReservationFlowIT {
         }
     }
 
+    @Test
+    void confirmingANonexistentReservationReturns404() throws Exception {
+        String customerToken = login("customer@ticketing.local", "Customer123!");
+
+        ResponseEntity<String> response = restTemplate.exchange(
+                "/api/reservations/" + UUID.randomUUID() + "/confirm", HttpMethod.POST,
+                new HttpEntity<>(bearer(customerToken)), String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(objectMapper.readTree(response.getBody()).get("title").asText()).isEqualTo("RESOURCE_NOT_FOUND");
+    }
+
     private boolean containsEventId(JsonNode events, String eventId) {
         for (JsonNode e : events) {
             if (e.get("id").asText().equals(eventId)) return true;
