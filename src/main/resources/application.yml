@@ -1,0 +1,70 @@
+spring:
+  application:
+    name: secure-ticketing-api
+
+  datasource:
+    url: jdbc:h2:mem:ticketing;DB_CLOSE_DELAY=-1;MODE=LEGACY
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+        # Row-level locking used explicitly in ReservationRepository queries;
+        # default isolation is READ_COMMITTED which is sufficient because
+        # the oversell guard uses a conditional UPDATE, not a read-then-write.
+        connection:
+          isolation: 2 # READ_COMMITTED
+
+  sql:
+    init:
+      mode: always
+
+server:
+  port: 8080
+
+app:
+  jwt:
+    # In production this MUST come from a secret manager / env var, never committed.
+    secret: ${JWT_SECRET:c2VjdXJlLXRpY2tldGluZy1kZW1vLXNlY3JldC1rZXktY2hhbmdlLW1lLWluLXByb2R1Y3Rpb24tMjU2Yml0}
+    access-token-ttl-minutes: 15
+    refresh-token-ttl-days: 7
+  rate-limit:
+    auth-endpoints:
+      capacity: 5
+      refill-per-minute: 5
+    reservation-endpoints:
+      capacity: 20
+      refill-per-minute: 20
+  idempotency:
+    ttl-hours: 24
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+logging:
+  level:
+    com.ticketing: INFO
+    org.springframework.security: INFO

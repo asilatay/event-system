@@ -1,0 +1,309 @@
+openapi: 3.0.3
+info:
+  title: Secure Ticketing & Reservation API
+  description: >
+    Event platform: organizers create and publish events, customers reserve seats.
+    No overselling, idempotent reservation creation, JWT auth with role-based
+    authorization. This file is a hand-maintained reference; the authoritative,
+    always-current spec is generated at runtime by springdoc at /v3/api-docs
+    and rendered at /swagger-ui.html.
+  version: "1.0.0"
+servers:
+  - url: http://localhost:8080
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    ProblemDetail:
+      type: object
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        timestamp: { type: string, format: date-time }
+    RegisterRequest:
+      type: object
+      required: [email, password, roles]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+        roles:
+          type: array
+          items: { type: string, enum: [ADMIN, ORGANIZER, CUSTOMER] }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken: { type: string }
+    AuthResponse:
+      type: object
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string }
+        tokenType: { type: string, example: Bearer }
+        expiresInSeconds: { type: integer }
+    CreateEventRequest:
+      type: object
+      required: [title, venue, startsAt, endsAt, capacity]
+      properties:
+        title: { type: string }
+        venue: { type: string }
+        startsAt: { type: string, format: date-time }
+        endsAt: { type: string, format: date-time }
+        capacity: { type: integer, minimum: 1 }
+    UpdateEventRequest:
+      allOf:
+        - $ref: '#/components/schemas/CreateEventRequest'
+        - type: object
+          required: [version]
+          properties:
+            version: { type: integer, format: int64 }
+    EventResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        ownerId: { type: string, format: uuid }
+        title: { type: string }
+        venue: { type: string }
+        startsAt: { type: string, format: date-time }
+        endsAt: { type: string, format: date-time }
+        capacity: { type: integer }
+        availableSeats: { type: integer }
+        published: { type: boolean }
+        version: { type: integer, format: int64 }
+    CreateReservationRequest:
+      type: object
+      required: [seats]
+      properties:
+        seats: { type: integer, minimum: 1 }
+    ReservationResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        eventId: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        status: { type: string, enum: [PENDING, CONFIRMED, CANCELLED] }
+        seats: { type: integer }
+        createdAt: { type: string, format: date-time }
+
+paths:
+  /api/auth/register:
+    post:
+      tags: [Authentication]
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201': { description: Created }
+        '409': { description: Email already registered }
+
+  /api/auth/login:
+    post:
+      tags: [Authentication]
+      summary: Login, receive access + refresh JWTs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '401': { description: Invalid credentials }
+
+  /api/auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: Exchange refresh token for a new pair (rotation)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '401': { description: Invalid/expired/revoked refresh token }
+
+  /api/events:
+    post:
+      tags: [Events]
+      security: [{ bearerAuth: [] }]
+      summary: Create a draft event (ORGANIZER or ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateEventRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EventResponse' }
+        '403': { description: Caller lacks ORGANIZER/ADMIN role }
+    get:
+      tags: [Events]
+      security: [{ bearerAuth: [] }]
+      summary: List events (organizer sees own; admin may filter by ownerId)
+      parameters:
+        - name: ownerId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/EventResponse' }
+
+  /api/events/{id}:
+    put:
+      tags: [Events]
+      security: [{ bearerAuth: [] }]
+      summary: Update an event (owner or admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateEventRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EventResponse' }
+        '403': { description: Caller does not own this event }
+        '409': { description: Optimistic lock conflict — version mismatch }
+
+  /api/events/{id}/publish:
+    post:
+      tags: [Events]
+      security: [{ bearerAuth: [] }]
+      summary: Publish a draft event
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EventResponse' }
+        '409': { description: Already published, or zero capacity }
+
+  /api/events/public:
+    get:
+      tags: [Discovery]
+      summary: Public discovery of published events (no auth required)
+      parameters:
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+        - name: q
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/EventResponse' }
+
+  /api/events/{id}/reservations:
+    post:
+      tags: [Reservations]
+      security: [{ bearerAuth: [] }]
+      summary: Create a PENDING reservation (Idempotency-Key required)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateReservationRequest' }
+      responses:
+        '201':
+          description: Created (or replayed from a prior identical request)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReservationResponse' }
+        '400': { description: Missing Idempotency-Key header }
+        '409': { description: Sold out, or Idempotency-Key reused with a different payload }
+
+  /api/reservations/{id}/confirm:
+    post:
+      tags: [Reservations]
+      security: [{ bearerAuth: [] }]
+      summary: Confirm a PENDING reservation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReservationResponse' }
+        '409': { description: Reservation is not PENDING }
+
+  /api/reservations/{id}/cancel:
+    post:
+      tags: [Reservations]
+      security: [{ bearerAuth: [] }]
+      summary: Cancel a reservation and release its seats
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReservationResponse' }
+        '409': { description: Reservation already cancelled }

@@ -1,0 +1,31 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;MODE=LEGACY;LOCK_TIMEOUT=15000
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+    hikari:
+      maximum-pool-size: 25
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    open-in-view: false
+
+app:
+  jwt:
+    secret: dGVzdC1zZWNyZXQta2V5LWZvci1qdW5pdC10ZXN0cy1vbmx5LW5vdC1mb3ItcHJvZHVjdGlvbi11c2U=
+    access-token-ttl-minutes: 15
+    refresh-token-ttl-days: 7
+  rate-limit:
+    auth-endpoints:
+      capacity: 1000
+      refill-per-minute: 1000
+    reservation-endpoints:
+      capacity: 1000
+      refill-per-minute: 1000
+  idempotency:
+    ttl-hours: 24
+
+logging:
+  level:
+    com.ticketing: INFO

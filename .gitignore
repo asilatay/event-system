@@ -1,0 +1,12 @@
+target/
+*.class
+
+.idea/
+*.iml
+.vscode/
+
+**/.claude/
+
+.DS_Store
+
+*.log

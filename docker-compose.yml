@@ -1,0 +1,18 @@
+version: "3.9"
+
+# Optional. The app uses in-memory H2 by default, so docker-compose is not
+# required to run it — this exists for convenience / to demonstrate how the
+# app would be containerized, and as a starting point for swapping in a real
+# Postgres instance later (see README "Moving beyond H2").
+services:
+  ticketing-api:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - JWT_SECRET=c2VjdXJlLXRpY2tldGluZy1kZW1vLXNlY3JldC1rZXktY2hhbmdlLW1lLWluLXByb2R1Y3Rpb24tMjU2Yml0
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
