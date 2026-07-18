@@ -7,6 +7,16 @@ info:
     authorization. This file is a hand-maintained reference; the authoritative,
     always-current spec is generated at runtime by springdoc at /v3/api-docs
     and rendered at /swagger-ui.html.
+
+    Seed accounts (created automatically by DataSeeder on startup):
+    - admin@ticketing.local / Admin123! (ADMIN)
+    - organizer@ticketing.local / Organizer123! (ORGANIZER)
+    - customer@ticketing.local / Customer123! (CUSTOMER)
+
+    Note: /api/auth/** is rate-limited to 5 requests/minute by default
+    (app.rate-limit.auth-endpoints); /api/events/{id}/reservations to 20/minute
+    (app.rate-limit.reservation-endpoints). See the 429 response on those
+    operations.
   version: "1.0.0"
 servers:
   - url: http://localhost:8080
@@ -25,6 +35,7 @@ components:
         title: { type: string }
         status: { type: integer }
         detail: { type: string }
+        instance: { type: string }
         timestamp: { type: string, format: date-time }
     RegisterRequest:
       type: object
@@ -68,7 +79,10 @@ components:
         - type: object
           required: [version]
           properties:
-            version: { type: integer, format: int64 }
+            version:
+              type: integer
+              format: int64
+              description: Must match the event's current row version (optimistic locking); a stale value is rejected, not silently overwritten.
     EventResponse:
       type: object
       properties:
@@ -107,9 +121,51 @@ paths:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/RegisterRequest' }
+            example:
+              email: new.organizer@ticketing.local
+              password: NewOrg123!
+              roles: [ORGANIZER]
       responses:
-        '201': { description: Created }
-        '409': { description: Email already registered }
+        '201':
+          description: Created. The new user's location is returned in the Location header; no response body.
+          headers:
+            Location:
+              schema: { type: string }
+              example: /api/users/b2c518ac-062f-478a-89dc-26e262afc819
+        '400':
+          description: Validation failure (e.g. unrecognized role name, password too short)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+              example:
+                type: https://ticketing.example.com/errors/invalid_argument
+                title: INVALID_ARGUMENT
+                status: 400
+                detail: "No enum constant com.ticketing.domain.Role.SUPERUSER"
+                instance: /api/auth/register
+                timestamp: "2026-07-18T16:43:43.461Z"
+        '409':
+          description: Email already registered
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+              example:
+                type: https://ticketing.example.com/errors/duplicate_email
+                title: DUPLICATE_EMAIL
+                status: 409
+                detail: "Email already registered: organizer@ticketing.local"
+                instance: /api/auth/register
+                timestamp: "2026-07-18T16:43:43.461Z"
+        '429':
+          description: Rate limit exceeded (5 requests/minute on /api/auth/**)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+              example:
+                type: https://ticketing.example.com/errors/rate_limit_exceeded
+                title: RATE_LIMIT_EXCEEDED
+                status: 429
+                detail: Too many requests, please try again later
 
   /api/auth/login:
     post:
@@ -120,13 +176,42 @@ paths:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/LoginRequest' }
+            example:
+              email: organizer@ticketing.local
+              password: Organizer123!
       responses:
         '200':
           description: OK
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AuthResponse' }
-        '401': { description: Invalid credentials }
+              example:
+                accessToken: eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiJiMmM1MThhYy0wNjJmLTQ3OGEtODlkYy0yNmUyNjJhZmM4MTki...
+                refreshToken: eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiJiMmM1MThhYy0wNjJmLTQ3OGEtODlkYy0yNmUyNjJhZmM4MTki...
+                tokenType: Bearer
+                expiresInSeconds: 900
+        '401':
+          description: "Invalid credentials (same response for a wrong password and a nonexistent email, to prevent email enumeration)"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+              example:
+                type: https://ticketing.example.com/errors/invalid_credentials
+                title: INVALID_CREDENTIALS
+                status: 401
+                detail: Invalid email or password
+                instance: /api/auth/login
+                timestamp: "2026-07-18T16:43:43.461Z"
+        '429':
+          description: Rate limit exceeded (5 requests/minute on /api/auth/**)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+              example:
+                type: https://ticketing.example.com/errors/rate_limit_exceeded
+                title: RATE_LIMIT_EXCEEDED
+                status: 429
+                detail: Too many requests, please try again later
 
   /api/auth/refresh:
     post:
@@ -137,13 +222,31 @@ paths:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/RefreshRequest' }
+            example:
+              refreshToken: eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiJiMmM1MThhYy0wNjJmLTQ3OGEtODlkYy0yNmUyNjJhZmM4MTki...
       responses:
         '200':
-          description: OK
+          description: "OK. The old refresh token is revoked immediately (rotation) — replaying it afterwards returns 401."
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AuthResponse' }
-        '401': { description: Invalid/expired/revoked refresh token }
+              example:
+                accessToken: eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiJiMmM1MThhYy0wNjJmLTQ3OGEtODlkYy0yNmUyNjJhZmM4MTki...
+                refreshToken: eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiJiMmM1MThhYy0wNjJmLTQ3OGEtODlkYy0yNmUyNjJhZmM4MTki...
+                tokenType: Bearer
+                expiresInSeconds: 900
+        '401':
+          description: Refresh token is invalid, expired, or already revoked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+              example:
+                type: https://ticketing.example.com/errors/invalid_refresh_token
+                title: INVALID_REFRESH_TOKEN
+                status: 401
+                detail: Refresh token is invalid, expired, or revoked
+                instance: /api/auth/refresh
+                timestamp: "2026-07-18T16:43:43.461Z"
 
   /api/events:
     post:
@@ -155,13 +258,41 @@ paths:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/CreateEventRequest' }
+            example:
+              title: Spring Boot Conference
+              venue: Tech Hall
+              startsAt: "2026-07-28T16:46:13.085Z"
+              endsAt: "2026-07-29T16:46:13.140Z"
+              capacity: 100
       responses:
         '201':
-          description: Created
+          description: "Created — always a draft (published: false) until explicitly published"
           content:
             application/json:
               schema: { $ref: '#/components/schemas/EventResponse' }
-        '403': { description: Caller lacks ORGANIZER/ADMIN role }
+              example:
+                id: 23a3ba73-01c4-4bc2-a4ca-9a87edc1efd2
+                ownerId: b2c518ac-062f-478a-89dc-26e262afc819
+                title: Spring Boot Conference
+                venue: Tech Hall
+                startsAt: "2026-07-28T16:46:13.085Z"
+                endsAt: "2026-07-29T16:46:13.140Z"
+                capacity: 100
+                availableSeats: 100
+                published: false
+                version: 0
+        '403':
+          description: Caller lacks the ORGANIZER/ADMIN role
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+              example:
+                type: https://ticketing.example.com/errors/access_denied
+                title: ACCESS_DENIED
+                status: 403
+                detail: Access is denied
+                instance: /api/events
+                timestamp: "2026-07-18T16:43:43.461Z"
     get:
       tags: [Events]
       security: [{ bearerAuth: [] }]
@@ -169,7 +300,9 @@ paths:
       parameters:
         - name: ownerId
           in: query
+          description: ADMIN only — filtering by an arbitrary owner. Ignored for non-admin callers, who always see only their own events.
           schema: { type: string, format: uuid }
+          example: b2c518ac-062f-478a-89dc-26e262afc819
       responses:
         '200':
           description: OK
@@ -178,6 +311,17 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/EventResponse' }
+              example:
+                - id: 23a3ba73-01c4-4bc2-a4ca-9a87edc1efd2
+                  ownerId: b2c518ac-062f-478a-89dc-26e262afc819
+                  title: Spring Boot Conference
+                  venue: Tech Hall
+                  startsAt: "2026-07-28T16:46:13.085Z"
+                  endsAt: "2026-07-29T16:46:13.140Z"
+                  capacity: 100
+                  availableSeats: 98
+                  published: true
+                  version: 2
 
   /api/events/{id}:
     put:
@@ -189,37 +333,131 @@ paths:
           in: path
           required: true
           schema: { type: string, format: uuid }
+          example: 23a3ba73-01c4-4bc2-a4ca-9a87edc1efd2
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: '#/components/schemas/UpdateEventRequest' }
+            example:
+              title: Spring Boot Conference (Updated)
+              venue: Tech Hall - Main Auditorium
+              startsAt: "2026-07-28T16:46:13.085Z"
+              endsAt: "2026-07-29T16:46:13.140Z"
+              capacity: 120
+              version: 0
       responses:
         '200':
           description: OK
           content:
             application/json:
               schema: { $ref: '#/components/schemas/EventResponse' }
-        '403': { description: Caller does not own this event }
-        '409': { description: Optimistic lock conflict — version mismatch }
+              example:
+                id: 23a3ba73-01c4-4bc2-a4ca-9a87edc1efd2
+                ownerId: b2c518ac-062f-478a-89dc-26e262afc819
+                title: Spring Boot Conference (Updated)
+                venue: Tech Hall - Main Auditorium
+                startsAt: "2026-07-28T16:46:13.085Z"
+                endsAt: "2026-07-29T16:46:13.140Z"
+                capacity: 120
+                availableSeats: 120
+                published: false
+                version: 1
+        '403':
+          description: Caller does not own this event (and is not an admin)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+              example:
+                type: https://ticketing.example.com/errors/ownership_violation
+                title: OWNERSHIP_VIOLATION
+                status: 403
+                detail: You do not own this event
+                instance: /api/events/23a3ba73-01c4-4bc2-a4ca-9a87edc1efd2
+                timestamp: "2026-07-18T16:43:43.461Z"
+        '404':
+          description: No event with this id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+              example:
+                type: https://ticketing.example.com/errors/resource_not_found
+                title: RESOURCE_NOT_FOUND
+                status: 404
+                detail: "Event not found: 23a3ba73-01c4-4bc2-a4ca-9a87edc1efd2"
+        '409':
+          description: "Optimistic lock conflict — the supplied version does not match the event's current version"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+              example:
+                type: https://ticketing.example.com/errors/invalid_state_transition
+                title: INVALID_STATE_TRANSITION
+                status: 409
+                detail: Event was modified concurrently by someone else; reload and retry with the latest version
+                instance: /api/events/23a3ba73-01c4-4bc2-a4ca-9a87edc1efd2
+                timestamp: "2026-07-18T16:43:43.461Z"
 
   /api/events/{id}/publish:
     post:
       tags: [Events]
       security: [{ bearerAuth: [] }]
-      summary: Publish a draft event
+      summary: Publish a draft event, making it visible in public discovery
       parameters:
         - name: id
           in: path
           required: true
           schema: { type: string, format: uuid }
+          example: 23a3ba73-01c4-4bc2-a4ca-9a87edc1efd2
       responses:
         '200':
           description: OK
           content:
             application/json:
               schema: { $ref: '#/components/schemas/EventResponse' }
-        '409': { description: Already published, or zero capacity }
+              example:
+                id: 23a3ba73-01c4-4bc2-a4ca-9a87edc1efd2
+                ownerId: b2c518ac-062f-478a-89dc-26e262afc819
+                title: Spring Boot Conference (Updated)
+                venue: Tech Hall - Main Auditorium
+                startsAt: "2026-07-28T16:46:13.085Z"
+                endsAt: "2026-07-29T16:46:13.140Z"
+                capacity: 120
+                availableSeats: 120
+                published: true
+                version: 2
+        '403':
+          description: Caller does not own this event (and is not an admin)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+              example:
+                type: https://ticketing.example.com/errors/ownership_violation
+                title: OWNERSHIP_VIOLATION
+                status: 403
+                detail: You do not own this event
+        '404':
+          description: No event with this id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+              example:
+                type: https://ticketing.example.com/errors/resource_not_found
+                title: RESOURCE_NOT_FOUND
+                status: 404
+                detail: "Event not found: 23a3ba73-01c4-4bc2-a4ca-9a87edc1efd2"
+        '409':
+          description: Already published, or zero capacity
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+              example:
+                type: https://ticketing.example.com/errors/invalid_state_transition
+                title: INVALID_STATE_TRANSITION
+                status: 409
+                detail: Event is already published
+                instance: /api/events/23a3ba73-01c4-4bc2-a4ca-9a87edc1efd2
+                timestamp: "2026-07-18T16:43:43.461Z"
 
   /api/events/public:
     get:
@@ -229,12 +467,16 @@ paths:
         - name: from
           in: query
           schema: { type: string, format: date-time }
+          example: "2026-07-28T16:46:13.085Z"
         - name: to
           in: query
           schema: { type: string, format: date-time }
+          example: "2026-07-29T16:46:13.140Z"
         - name: q
           in: query
+          description: Case-insensitive substring match against title or venue.
           schema: { type: string }
+          example: Spring
       responses:
         '200':
           description: OK
@@ -243,6 +485,17 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/EventResponse' }
+              example:
+                - id: 23a3ba73-01c4-4bc2-a4ca-9a87edc1efd2
+                  ownerId: b2c518ac-062f-478a-89dc-26e262afc819
+                  title: Spring Boot Conference (Updated)
+                  venue: Tech Hall - Main Auditorium
+                  startsAt: "2026-07-28T16:46:13.085Z"
+                  endsAt: "2026-07-29T16:46:13.140Z"
+                  capacity: 120
+                  availableSeats: 120
+                  published: true
+                  version: 2
 
   /api/events/{id}/reservations:
     post:
@@ -254,23 +507,87 @@ paths:
           in: path
           required: true
           schema: { type: string, format: uuid }
+          example: 23a3ba73-01c4-4bc2-a4ca-9a87edc1efd2
         - name: Idempotency-Key
           in: header
           required: true
+          description: Client-generated unique key (e.g. a UUID). Retrying with the same key + same body replays the original result instead of double-booking.
           schema: { type: string }
+          example: dda2ee35-ccbc-4f64-aa2b-33bba0d66168
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: '#/components/schemas/CreateReservationRequest' }
+            example:
+              seats: 2
       responses:
         '201':
-          description: Created (or replayed from a prior identical request)
+          description: Created (or replayed verbatim from a prior request with the same Idempotency-Key + body)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ReservationResponse' }
-        '400': { description: Missing Idempotency-Key header }
-        '409': { description: Sold out, or Idempotency-Key reused with a different payload }
+              example:
+                id: ee6ca00c-0ab9-4206-90cf-1ba54aed3e75
+                eventId: 23a3ba73-01c4-4bc2-a4ca-9a87edc1efd2
+                userId: 0a0387e6-cc83-44f1-a14e-44432ddfd546
+                status: PENDING
+                seats: 2
+                createdAt: "2026-07-18T16:46:14.082Z"
+        '400':
+          description: Missing Idempotency-Key header
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+              example:
+                type: https://ticketing.example.com/errors/idempotency_key_required
+                title: IDEMPOTENCY_KEY_REQUIRED
+                status: 400
+                detail: Idempotency-Key header is required for this endpoint
+                instance: /api/events/23a3ba73-01c4-4bc2-a4ca-9a87edc1efd2/reservations
+                timestamp: "2026-07-18T16:46:14.445Z"
+        '404':
+          description: No event with this id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+              example:
+                type: https://ticketing.example.com/errors/resource_not_found
+                title: RESOURCE_NOT_FOUND
+                status: 404
+                detail: "Event not found: 23a3ba73-01c4-4bc2-a4ca-9a87edc1efd2"
+        '409':
+          description: Event is sold out, unpublished, or the Idempotency-Key was reused with a different request body
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+              examples:
+                soldOut:
+                  summary: Not enough seats remaining
+                  value:
+                    type: https://ticketing.example.com/errors/event_sold_out
+                    title: EVENT_SOLD_OUT
+                    status: 409
+                    detail: "Not enough seats available for event: 23a3ba73-01c4-4bc2-a4ca-9a87edc1efd2"
+                idempotencyConflict:
+                  summary: Same Idempotency-Key reused with a different body
+                  value:
+                    type: https://ticketing.example.com/errors/idempotency_key_conflict
+                    title: IDEMPOTENCY_KEY_CONFLICT
+                    status: 409
+                    detail: "Idempotency-Key 'dda2ee35-ccbc-4f64-aa2b-33bba0d66168' was already used with a different request payload"
+                    instance: /api/events/23a3ba73-01c4-4bc2-a4ca-9a87edc1efd2/reservations
+                    timestamp: "2026-07-18T16:46:14.404Z"
+        '429':
+          description: Rate limit exceeded (20 requests/minute on this endpoint)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+              example:
+                type: https://ticketing.example.com/errors/rate_limit_exceeded
+                title: RATE_LIMIT_EXCEEDED
+                status: 429
+                detail: Too many requests, please try again later
 
   /api/reservations/{id}/confirm:
     post:
@@ -282,28 +599,106 @@ paths:
           in: path
           required: true
           schema: { type: string, format: uuid }
+          example: ee6ca00c-0ab9-4206-90cf-1ba54aed3e75
       responses:
         '200':
           description: OK
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ReservationResponse' }
-        '409': { description: Reservation is not PENDING }
+              example:
+                id: ee6ca00c-0ab9-4206-90cf-1ba54aed3e75
+                eventId: 23a3ba73-01c4-4bc2-a4ca-9a87edc1efd2
+                userId: 0a0387e6-cc83-44f1-a14e-44432ddfd546
+                status: CONFIRMED
+                seats: 2
+                createdAt: "2026-07-18T16:46:14.082Z"
+        '403':
+          description: Caller does not own this reservation (and is not an admin)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+              example:
+                type: https://ticketing.example.com/errors/ownership_violation
+                title: OWNERSHIP_VIOLATION
+                status: 403
+                detail: You do not own this reservation
+        '404':
+          description: No reservation with this id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+              example:
+                type: https://ticketing.example.com/errors/resource_not_found
+                title: RESOURCE_NOT_FOUND
+                status: 404
+                detail: "Reservation not found: ee6ca00c-0ab9-4206-90cf-1ba54aed3e75"
+        '409':
+          description: Reservation is not PENDING (already confirmed or cancelled)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+              example:
+                type: https://ticketing.example.com/errors/invalid_state_transition
+                title: INVALID_STATE_TRANSITION
+                status: 409
+                detail: "Only a PENDING reservation can be confirmed (current: CONFIRMED)"
+                instance: /api/reservations/ee6ca00c-0ab9-4206-90cf-1ba54aed3e75/confirm
+                timestamp: "2026-07-18T16:46:14.404Z"
 
   /api/reservations/{id}/cancel:
     post:
       tags: [Reservations]
       security: [{ bearerAuth: [] }]
-      summary: Cancel a reservation and release its seats
+      summary: "Cancel a reservation and release its seats. Allowed from PENDING or CONFIRMED — an organizer may also cancel a reservation on their own event."
       parameters:
         - name: id
           in: path
           required: true
           schema: { type: string, format: uuid }
+          example: ee6ca00c-0ab9-4206-90cf-1ba54aed3e75
       responses:
         '200':
           description: OK
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ReservationResponse' }
-        '409': { description: Reservation already cancelled }
+              example:
+                id: ee6ca00c-0ab9-4206-90cf-1ba54aed3e75
+                eventId: 23a3ba73-01c4-4bc2-a4ca-9a87edc1efd2
+                userId: 0a0387e6-cc83-44f1-a14e-44432ddfd546
+                status: CANCELLED
+                seats: 2
+                createdAt: "2026-07-18T16:46:14.082Z"
+        '403':
+          description: Caller is neither the reservation owner, the owning event's organizer, nor an admin
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+              example:
+                type: https://ticketing.example.com/errors/ownership_violation
+                title: OWNERSHIP_VIOLATION
+                status: 403
+                detail: You do not have permission to cancel this reservation
+        '404':
+          description: No reservation with this id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+              example:
+                type: https://ticketing.example.com/errors/resource_not_found
+                title: RESOURCE_NOT_FOUND
+                status: 404
+                detail: "Reservation not found: ee6ca00c-0ab9-4206-90cf-1ba54aed3e75"
+        '409':
+          description: Reservation is already cancelled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+              example:
+                type: https://ticketing.example.com/errors/invalid_state_transition
+                title: INVALID_STATE_TRANSITION
+                status: 409
+                detail: Reservation is already cancelled
+                instance: /api/reservations/ee6ca00c-0ab9-4206-90cf-1ba54aed3e75/cancel
+                timestamp: "2026-07-18T16:46:14.404Z"
