@@ -295,3 +295,83 @@ to Flyway/Liquibase migrations instead of `update`). The oversell-guard query
 (`EventRepository#tryReserveSeats`) is plain JPQL and needs no changes — the
 "single atomic UPDATE" pattern is standard SQL behavior, not an H2-specific
 trick.
+
+## 9. Microservice vs monolith
+
+Could Auth, Events, and Reservations have been three separate services
+instead of one Spring Boot app? Yes, but not for free — the split would
+directly undercut the correctness guarantee the case is built around.
+
+**What would split cleanly:** JWT verification. `JwtAuthenticationFilter`
+never touches the database — signature check and role extraction are
+entirely local to the claims. An Event or Reservation service could verify
+tokens issued by an Auth service without a network call back to it, sharing
+only the signing key (or better, an asymmetric key pair where Auth alone
+holds the private half).
+
+**What would get materially harder:**
+
+1. **The oversell guard (ADR-02).** Today's guarantee is one atomic SQL
+   `UPDATE` against one row in one database:
+   ```sql
+   UPDATE event SET seats_reserved = seats_reserved + :n
+   WHERE id = :id AND (seats_reserved + :n) <= capacity
+   ```
+   Split Event and Reservation into separate databases and this becomes a
+   cross-service operation. The realistic fix — Event service keeps the
+   atomic `UPDATE` internally and exposes it as `POST
+   /internal/events/{id}/try-reserve` — preserves atomicity on the Event
+   side, but now needs a **saga**: if the reservation write fails after
+   seats were already decremented, something has to call a compensating
+   `release-seats` endpoint. Today that compensation is free (one
+   `@Transactional` rollback); across services it has to be built and
+   tested by hand.
+2. **Idempotency (ADR-06).** The insert-first store itself stays
+   service-local fine (`IdempotencyTransactionalOps`'s pattern ports
+   directly). The new problem is that the idempotent "create reservation"
+   flow now wraps a cross-service `try-reserve` call that is *not*
+   inherently idempotent — it needs its own idempotency key, or a retry can
+   double-decrement seats.
+3. **Caller identity.** `CurrentUserResolver` loads the full `User` entity
+   from the database (e.g. for the `ADMIN` role check in
+   `EventService#listEvents`). Without a shared `User` table, Event/
+   Reservation services need either a synchronous call back to Auth, a
+   local user cache, or a redesign to authorize purely from JWT claims
+   (roles are already in the token, so this is plausible even without
+   splitting).
+4. **Rate limiting (ADR-04).** The in-memory `Bucket4j` map is already
+   documented as a single-instance limitation. Splitting doesn't make this
+   worse so much as force the fix sooner — a shared store (Redis) or a
+   central gateway, either of which is standard in a microservice
+   deployment anyway.
+5. **Audit log (ADR-05).** Three separate databases means three fragments
+   of audit trail; a real deployment would need centralized log
+   aggregation. Also a natural microservice pattern, not a net loss.
+
+**Trade-off table:**
+
+| Dimension | Monolith (current) | 3 microservices |
+|---|---|---|
+| Oversell guarantee | One atomic SQL `UPDATE`, free via DB commit | RPC + hand-built saga with compensation |
+| Idempotency | Single transaction, simple insert-first | Service-local store, but the cross-service call must also be idempotent |
+| Authorization (role/ownership checks) | Direct in-JVM access to the `User` entity | Must move to JWT claims or a synchronous call to Auth |
+| JWT verification | Already stateless, no DB | Works identically — no gain, no loss |
+| Rate limiting | In-memory, fine for one instance | Needs a shared store or gateway (already due anyway) |
+| Audit log | Single table, written inside the same transaction | Needs centralized log aggregation |
+| Independent scaling | None — the whole app scales together | Yes — useful if Event/Reservation traffic shapes diverge |
+| Independent deploys | None — one jar, one release | Yes — changing Auth can't break Event |
+| Operational complexity | Low — one service, one DB, one log stream | High — 3 services, 3 databases, distributed tracing, saga monitoring |
+| Reservation-create latency | In-process call chain | Extra network hop to Event service |
+| Testability | `ReservationConcurrencyIT` fires 60 threads at one process/DB directly | Needs contract tests plus a real multi-service environment for the same guarantee |
+| Failure blast radius | A bug can affect the whole app | An Auth outage doesn't necessarily block Event/Reservation if public keys are cached |
+
+**Verdict:** at this case's scale, the gain (independent scaling/deploys)
+isn't answering a real need, while the cost (rebuilding the single-transaction
+atomicity that ADR-02 gets for free) is concrete and immediate. Systems that
+do split this way in practice (ticketing platforms at real scale) typically
+don't go all the way to three independent databases — they keep inventory
+behind one atomic reserve/release boundary and let other concerns orbit it,
+rather than partitioning purely along Auth/Event/Reservation lines. Absent a
+real traffic asymmetry between these three (e.g. Event reads outscaling
+Reservation writes by orders of magnitude), splitting here means re-solving
+ADR-02's problem in a harder environment.
