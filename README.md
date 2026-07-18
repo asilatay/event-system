@@ -102,6 +102,12 @@ because it depends on the requested resource's data.
 
 ## 3. Architectural Decision Records
 
+![Layered architecture: client through the security filter chain, three REST controllers, the business service layer with an idempotency/audit safety wrapper around reservation writes, down to the H2 database](./docs/architecture.png)
+
+The ADRs below explain the reasoning behind each layer; the highlighted
+"safety wrappers" box is `IdempotencyService` + `AuditService`, which sit
+specifically in front of reservation writes (see ADR-06).
+
 ### ADR-01 — `Event.seatsReserved` (deviation from the literal entity spec)
 The spec's `Event` entity lists `{id, ownerId, title, venue, startsAt, endsAt,
 capacity, published, version}` only. A `seatsReserved` counter was added
