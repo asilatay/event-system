@@ -32,6 +32,10 @@ public class AuthService {
     private final AuditService auditService;
     private final long accessTokenTtlMinutes;
 
+    // A precomputed hash of an arbitrary password, used only so login() has something
+    // to run PasswordEncoder.matches against when the email does not exist - see login().
+    private final String dummyPasswordHash;
+
     public AuthService(UserRepository userRepository,
                         RefreshTokenRepository refreshTokenRepository,
                         PasswordEncoder passwordEncoder,
@@ -44,6 +48,7 @@ public class AuthService {
         this.jwtService = jwtService;
         this.auditService = auditService;
         this.accessTokenTtlMinutes = Long.parseLong(env.getProperty("app.jwt.access-token-ttl-minutes", "15"));
+        this.dummyPasswordHash = passwordEncoder.encode("timing-safety-dummy-password");
     }
 
     @Transactional
@@ -77,16 +82,21 @@ public class AuthService {
 
     @Transactional
     public AuthResponse login(LoginRequest request, String ip, String userAgent) {
-        User user = userRepository.findByEmail(request.email())
-                .orElseThrow(() -> {
-                    // Same exception for "no such user" and "wrong password" -
-                    // never reveal which one it was (prevents email enumeration).
-                    auditService.record(null, "LOGIN_FAILED", "User", request.email(), ip, userAgent);
-                    return new InvalidCredentialsException();
-                });
+        User user = userRepository.findByEmail(request.email()).orElse(null);
 
-        if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
-            auditService.record(user.getId(), "LOGIN_FAILED", "User", user.getId().toString(), ip, userAgent);
+        // Same exception for "no such user" and "wrong password" - never reveal which
+        // one it was (prevents email enumeration). That protection only holds if both
+        // paths take the same time, though: BCrypt.matches costs real, deliberate
+        // latency (that is the point of BCrypt), so always calling it - even against a
+        // dummy hash when there is no such user - keeps the two paths from being
+        // distinguishable by response time, not just by message text.
+        String hashToCheck = user != null ? user.getPasswordHash() : dummyPasswordHash;
+        boolean passwordMatches = passwordEncoder.matches(request.password(), hashToCheck);
+
+        if (user == null || !passwordMatches) {
+            auditService.record(
+                    user != null ? user.getId() : null, "LOGIN_FAILED", "User",
+                    user != null ? user.getId().toString() : request.email(), ip, userAgent);
             throw new InvalidCredentialsException();
         }
 

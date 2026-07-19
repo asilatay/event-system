@@ -35,8 +35,10 @@ server:
 
 app:
   jwt:
-    # In production this MUST come from a secret manager / env var, never committed.
-    secret: ${JWT_SECRET:c2VjdXJlLXRpY2tldGluZy1kZW1vLXNlY3JldC1rZXktY2hhbmdlLW1lLWluLXByb2R1Y3Rpb24tMjU2Yml0}
+    # No committed default: JwtService generates a random per-run key when this is
+    # unset (fine for local/demo, tokens do not survive a restart). A real deployment
+    # must set JWT_SECRET from a secret manager / env var so tokens persist across restarts.
+    secret: ${JWT_SECRET:}
     access-token-ttl-minutes: 15
     refresh-token-ttl-days: 7
   rate-limit:

@@ -2,6 +2,8 @@ package com.ticketing.security;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
+import org.springframework.core.annotation.Order;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
@@ -60,7 +62,27 @@ public class SecurityConfig {
         return config.getAuthenticationManager();
     }
 
+    // Dev/demo only: a dedicated, earlier-ordered filter chain scoped strictly to
+    // /h2-console/**, so the clickjacking-protection opt-out (frameOptions disabled -
+    // the H2 console renders its UI in a frame) and the permitAll never apply to the
+    // rest of the API. @Profile("!prod") means this bean - and therefore the console
+    // route entirely - does not exist when the "prod" profile is active; requests to
+    // /h2-console/** then fall through to the main chain's anyRequest().authenticated(),
+    // which has no route for it anyway (404), rather than relying solely on a comment
+    // to remember to disable this before a real deployment.
     @Bean
+    @Order(1)
+    @Profile("!prod")
+    public SecurityFilterChain h2ConsoleFilterChain(HttpSecurity http) throws Exception {
+        http.securityMatcher("/h2-console/**")
+                .csrf(csrf -> csrf.disable())
+                .headers(headers -> headers.frameOptions(frame -> frame.disable()))
+                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
+        return http.build();
+    }
+
+    @Bean
+    @Order(2)
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
             // Stateless REST API + Bearer JWT: CSRF protection is for cookie-based
@@ -76,9 +98,7 @@ public class SecurityConfig {
                     .requestMatchers("/api/events/public/**", "/api/events/public").permitAll()
                     .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                     .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
-                    .requestMatchers("/h2-console/**").permitAll() // dev/demo only, see README
                     .anyRequest().authenticated())
-            .headers(headers -> headers.frameOptions(frame -> frame.disable())) // required for h2-console
             // Order matters: JWT filter runs first so an authenticated principal is
             // available to RateLimitingFilter for per-user (not just per-IP) buckets.
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
