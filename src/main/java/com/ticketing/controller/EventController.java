@@ -1,5 +1,6 @@
 package com.ticketing.controller;
 
+import com.ticketing.common.RequestContext;
 import com.ticketing.domain.Event;
 import com.ticketing.domain.User;
 import com.ticketing.dto.CreateEventRequest;
@@ -39,7 +40,7 @@ public class EventController {
     @Operation(summary = "Create a draft event owned by the authenticated organizer/admin")
     public ResponseEntity<EventResponse> createEvent(@Valid @RequestBody CreateEventRequest request, HttpServletRequest httpRequest) {
         User caller = currentUserResolver.resolve();
-        Event event = eventService.createEvent(caller, request, CurrentUserResolver.clientIp(httpRequest), httpRequest.getHeader("User-Agent"));
+        Event event = eventService.createEvent(caller, request, RequestContext.from(httpRequest));
         return ResponseEntity.status(HttpStatus.CREATED).body(EventResponse.from(event));
     }
 
@@ -50,7 +51,7 @@ public class EventController {
                                                       @Valid @RequestBody UpdateEventRequest request,
                                                       HttpServletRequest httpRequest) {
         User caller = currentUserResolver.resolve();
-        Event event = eventService.updateEvent(caller, id, request, CurrentUserResolver.clientIp(httpRequest), httpRequest.getHeader("User-Agent"));
+        Event event = eventService.updateEvent(caller, id, request, RequestContext.from(httpRequest));
         return ResponseEntity.ok(EventResponse.from(event));
     }
 
@@ -59,7 +60,7 @@ public class EventController {
     @Operation(summary = "Publish a draft event, making it visible in public discovery")
     public ResponseEntity<EventResponse> publishEvent(@PathVariable UUID id, HttpServletRequest httpRequest) {
         User caller = currentUserResolver.resolve();
-        Event event = eventService.publishEvent(caller, id, CurrentUserResolver.clientIp(httpRequest), httpRequest.getHeader("User-Agent"));
+        Event event = eventService.publishEvent(caller, id, RequestContext.from(httpRequest));
         return ResponseEntity.ok(EventResponse.from(event));
     }
 

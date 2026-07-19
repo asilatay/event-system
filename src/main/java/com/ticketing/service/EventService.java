@@ -1,5 +1,6 @@
 package com.ticketing.service;
 
+import com.ticketing.common.RequestContext;
 import com.ticketing.domain.Event;
 import com.ticketing.domain.Role;
 import com.ticketing.domain.User;
@@ -30,19 +31,19 @@ public class EventService {
     }
 
     @Transactional
-    public Event createEvent(User caller, CreateEventRequest request, String ip, String userAgent) {
+    public Event createEvent(User caller, CreateEventRequest request, RequestContext ctx) {
         if (request.endsAt().isBefore(request.startsAt())) {
             throw new IllegalArgumentException("endsAt must not be before startsAt");
         }
         Event event = new Event(caller.getId(), request.title(), request.venue(),
                 request.startsAt(), request.endsAt(), request.capacity());
         event = eventRepository.save(event);
-        auditService.record(caller.getId(), "EVENT_CREATED", "Event", event.getId().toString(), ip, userAgent);
+        auditService.record(caller.getId(), "EVENT_CREATED", "Event", event.getId().toString(), ctx);
         return event;
     }
 
     @Transactional
-    public Event updateEvent(User caller, UUID eventId, UpdateEventRequest request, String ip, String userAgent) {
+    public Event updateEvent(User caller, UUID eventId, UpdateEventRequest request, RequestContext ctx) {
         Event event = getOrThrow(eventId);
         assertOwnerOrAdmin(caller, event);
 
@@ -83,12 +84,12 @@ public class EventService {
                     "Event was modified concurrently by someone else; reload and retry with the latest version");
         }
 
-        auditService.record(caller.getId(), "EVENT_UPDATED", "Event", event.getId().toString(), ip, userAgent);
+        auditService.record(caller.getId(), "EVENT_UPDATED", "Event", event.getId().toString(), ctx);
         return event;
     }
 
     @Transactional
-    public Event publishEvent(User caller, UUID eventId, String ip, String userAgent) {
+    public Event publishEvent(User caller, UUID eventId, RequestContext ctx) {
         Event event = getOrThrow(eventId);
         assertOwnerOrAdmin(caller, event);
 
@@ -101,7 +102,7 @@ public class EventService {
 
         event.setPublished(true);
         event = eventRepository.save(event);
-        auditService.record(caller.getId(), "EVENT_PUBLISHED", "Event", event.getId().toString(), ip, userAgent);
+        auditService.record(caller.getId(), "EVENT_PUBLISHED", "Event", event.getId().toString(), ctx);
         return event;
     }
 

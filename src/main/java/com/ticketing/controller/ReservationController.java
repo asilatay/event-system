@@ -1,5 +1,6 @@
 package com.ticketing.controller;
 
+import com.ticketing.common.RequestContext;
 import com.ticketing.domain.Reservation;
 import com.ticketing.domain.User;
 import com.ticketing.dto.CreateReservationRequest;
@@ -55,8 +56,7 @@ public class ReservationController {
             HttpServletRequest httpRequest) {
 
         User caller = currentUserResolver.resolve();
-        String ip = CurrentUserResolver.clientIp(httpRequest);
-        String userAgent = httpRequest.getHeader("User-Agent");
+        RequestContext ctx = RequestContext.from(httpRequest);
 
         ReservationResponse response = idempotencyService.execute(
                 idempotencyKey,
@@ -65,7 +65,7 @@ public class ReservationController {
                 request,
                 ReservationResponse.class,
                 () -> ReservationResponse.from(
-                        reservationService.createReservation(caller, id, request.seats(), ip, userAgent))
+                        reservationService.createReservation(caller, id, request.seats(), ctx))
         );
 
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
@@ -75,8 +75,7 @@ public class ReservationController {
     @Operation(summary = "Confirm a PENDING reservation")
     public ResponseEntity<ReservationResponse> confirm(@PathVariable UUID id, HttpServletRequest httpRequest) {
         User caller = currentUserResolver.resolve();
-        Reservation reservation = reservationService.confirm(
-                caller, id, CurrentUserResolver.clientIp(httpRequest), httpRequest.getHeader("User-Agent"));
+        Reservation reservation = reservationService.confirm(caller, id, RequestContext.from(httpRequest));
         return ResponseEntity.ok(ReservationResponse.from(reservation));
     }
 
@@ -84,8 +83,7 @@ public class ReservationController {
     @Operation(summary = "Cancel a reservation and release its seats back to the event")
     public ResponseEntity<ReservationResponse> cancel(@PathVariable UUID id, HttpServletRequest httpRequest) {
         User caller = currentUserResolver.resolve();
-        Reservation reservation = reservationService.cancel(
-                caller, id, CurrentUserResolver.clientIp(httpRequest), httpRequest.getHeader("User-Agent"));
+        Reservation reservation = reservationService.cancel(caller, id, RequestContext.from(httpRequest));
         return ResponseEntity.ok(ReservationResponse.from(reservation));
     }
 }

@@ -1,5 +1,6 @@
 package com.ticketing.service;
 
+import com.ticketing.common.RequestContext;
 import com.ticketing.domain.RefreshToken;
 import com.ticketing.domain.Role;
 import com.ticketing.domain.User;
@@ -52,7 +53,7 @@ public class AuthService {
     }
 
     @Transactional
-    public User register(RegisterRequest request, String ip, String userAgent) {
+    public User register(RegisterRequest request, RequestContext ctx) {
         // Deliberately reveals whether the email is already registered (unlike login,
         // which never does - see login() below). A silent no-op response here would hide
         // it, but this app has no email delivery to instead notify the real owner that
@@ -82,12 +83,12 @@ public class AuthService {
         User user = new User(request.email(), passwordEncoder.encode(request.password()), roles);
         user = userRepository.save(user);
 
-        auditService.record(user.getId(), "USER_REGISTERED", "User", user.getId().toString(), ip, userAgent);
+        auditService.record(user.getId(), "USER_REGISTERED", "User", user.getId().toString(), ctx);
         return user;
     }
 
     @Transactional
-    public AuthResponse login(LoginRequest request, String ip, String userAgent) {
+    public AuthResponse login(LoginRequest request, RequestContext ctx) {
         User user = userRepository.findByEmail(request.email()).orElse(null);
 
         // Same exception for "no such user" and "wrong password" - never reveal which
@@ -102,7 +103,7 @@ public class AuthService {
         if (user == null || !passwordMatches) {
             auditService.record(
                     user != null ? user.getId() : null, "LOGIN_FAILED", "User",
-                    user != null ? user.getId().toString() : request.email(), ip, userAgent);
+                    user != null ? user.getId().toString() : request.email(), ctx);
             throw new InvalidCredentialsException();
         }
 
@@ -110,12 +111,12 @@ public class AuthService {
         userRepository.save(user);
 
         AuthResponse tokens = issueTokenPair(user);
-        auditService.record(user.getId(), "LOGIN_SUCCESS", "User", user.getId().toString(), ip, userAgent);
+        auditService.record(user.getId(), "LOGIN_SUCCESS", "User", user.getId().toString(), ctx);
         return tokens;
     }
 
     @Transactional
-    public AuthResponse refresh(String refreshTokenJwt, String ip, String userAgent) {
+    public AuthResponse refresh(String refreshTokenJwt, RequestContext ctx) {
         if (!jwtService.isValid(refreshTokenJwt) || !"refresh".equals(safeExtractType(refreshTokenJwt))) {
             throw new InvalidRefreshTokenException();
         }
@@ -140,7 +141,7 @@ public class AuthService {
                 .orElseThrow(InvalidRefreshTokenException::new);
 
         AuthResponse tokens = issueTokenPair(user);
-        auditService.record(user.getId(), "TOKEN_REFRESHED", "User", user.getId().toString(), ip, userAgent);
+        auditService.record(user.getId(), "TOKEN_REFRESHED", "User", user.getId().toString(), ctx);
         return tokens;
     }
 

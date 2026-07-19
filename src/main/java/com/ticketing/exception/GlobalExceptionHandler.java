@@ -50,10 +50,8 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler(ApiException.class)
     public ProblemDetail handleApiException(ApiException ex, WebRequest request) {
-        ProblemDetail pd = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
-        pd.setTitle(ex.getErrorCode());
+        ProblemDetail pd = buildProblemDetail(ex.getStatus(), ex.getErrorCode(), ex.getMessage());
         pd.setType(URI.create("https://ticketing.example.com/errors/" + ex.getErrorCode().toLowerCase()));
-        pd.setProperty("timestamp", Instant.now());
         if (ex.getStatus().is5xxServerError()) {
             log.error("Unhandled server-side API exception", ex);
         }
@@ -67,27 +65,19 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         ex.getBindingResult().getFieldErrors().forEach(fe ->
                 fieldErrors.put(fe.getField(), fe.getDefaultMessage()));
 
-        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Validation failed");
-        pd.setTitle("VALIDATION_ERROR");
-        pd.setProperty("timestamp", Instant.now());
+        ProblemDetail pd = buildProblemDetail(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "Validation failed");
         pd.setProperty("fieldErrors", fieldErrors);
         return ResponseEntity.status(status).headers(headers).body(pd);
     }
 
     @ExceptionHandler(ConstraintViolationException.class)
     public ProblemDetail handleConstraintViolation(ConstraintViolationException ex) {
-        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
-        pd.setTitle("CONSTRAINT_VIOLATION");
-        pd.setProperty("timestamp", Instant.now());
-        return pd;
+        return buildProblemDetail(HttpStatus.BAD_REQUEST, "CONSTRAINT_VIOLATION", ex.getMessage());
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ProblemDetail handleIllegalArgument(IllegalArgumentException ex) {
-        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
-        pd.setTitle("INVALID_ARGUMENT");
-        pd.setProperty("timestamp", Instant.now());
-        return pd;
+        return buildProblemDetail(HttpStatus.BAD_REQUEST, "INVALID_ARGUMENT", ex.getMessage());
     }
 
     // Covers a path variable or query param that can't be converted to its declared
@@ -99,18 +89,14 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         String name = ex instanceof MethodArgumentTypeMismatchException matme
                 ? matme.getName() : String.valueOf(ex.getPropertyName());
         String detail = "Parameter '" + name + "' has an invalid value: " + ex.getValue();
-        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, detail);
-        pd.setTitle("INVALID_ARGUMENT");
-        pd.setProperty("timestamp", Instant.now());
+        ProblemDetail pd = buildProblemDetail(HttpStatus.BAD_REQUEST, "INVALID_ARGUMENT", detail);
         return ResponseEntity.status(status).headers(headers).body(pd);
     }
 
     @Override
     protected ResponseEntity<Object> handleHttpMessageNotReadable(
             HttpMessageNotReadableException ex, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
-        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Malformed request body");
-        pd.setTitle("MALFORMED_REQUEST");
-        pd.setProperty("timestamp", Instant.now());
+        ProblemDetail pd = buildProblemDetail(HttpStatus.BAD_REQUEST, "MALFORMED_REQUEST", "Malformed request body");
         return ResponseEntity.status(status).headers(headers).body(pd);
     }
 
@@ -118,9 +104,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @Override
     protected ResponseEntity<Object> handleNoResourceFoundException(
             NoResourceFoundException ex, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
-        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, "No such endpoint");
-        pd.setTitle("RESOURCE_NOT_FOUND");
-        pd.setProperty("timestamp", Instant.now());
+        ProblemDetail pd = buildProblemDetail(HttpStatus.NOT_FOUND, "RESOURCE_NOT_FOUND", "No such endpoint");
         return ResponseEntity.status(status).headers(headers).body(pd);
     }
 
@@ -141,28 +125,25 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler({AccessDeniedException.class})
     public ProblemDetail handleAccessDenied(AccessDeniedException ex) {
-        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, "Access is denied");
-        pd.setTitle("ACCESS_DENIED");
-        pd.setProperty("timestamp", Instant.now());
-        return pd;
+        return buildProblemDetail(HttpStatus.FORBIDDEN, "ACCESS_DENIED", "Access is denied");
     }
 
     // Not exercised by the current login flow (AuthService.login throws
     // InvalidCredentialsException instead); kept for any AuthenticationManager-based path.
     @ExceptionHandler(BadCredentialsException.class)
     public ProblemDetail handleBadCredentials(BadCredentialsException ex) {
-        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, "Invalid email or password");
-        pd.setTitle("INVALID_CREDENTIALS");
-        pd.setProperty("timestamp", Instant.now());
-        return pd;
+        return buildProblemDetail(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", "Invalid email or password");
     }
 
     @ExceptionHandler(Exception.class)
     public ProblemDetail handleGeneric(Exception ex) {
         log.error("Unhandled exception", ex);
-        ProblemDetail pd = ProblemDetail.forStatusAndDetail(
-                HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred");
-        pd.setTitle("INTERNAL_ERROR");
+        return buildProblemDetail(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", "An unexpected error occurred");
+    }
+
+    private ProblemDetail buildProblemDetail(HttpStatusCode status, String title, String detail) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(status, detail);
+        pd.setTitle(title);
         pd.setProperty("timestamp", Instant.now());
         return pd;
     }

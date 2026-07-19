@@ -1,5 +1,6 @@
 package com.ticketing.service;
 
+import com.ticketing.common.RequestContext;
 import com.ticketing.domain.Event;
 import com.ticketing.domain.Reservation;
 import com.ticketing.domain.ReservationStatus;
@@ -39,7 +40,7 @@ public class ReservationService {
      * the repository query, not in this method's control flow.
      */
     @Transactional
-    public Reservation createReservation(User caller, UUID eventId, int seats, String ip, String userAgent) {
+    public Reservation createReservation(User caller, UUID eventId, int seats, RequestContext ctx) {
         Event event = eventRepository.findById(eventId)
                 .orElseThrow(() -> new ResourceNotFoundException("Event", eventId));
 
@@ -49,19 +50,19 @@ public class ReservationService {
 
         int updatedRows = eventRepository.tryReserveSeats(eventId, seats);
         if (updatedRows == 0) {
-            auditService.record(caller.getId(), "RESERVATION_REJECTED_SOLD_OUT", "Event", eventId.toString(), ip, userAgent);
+            auditService.record(caller.getId(), "RESERVATION_REJECTED_SOLD_OUT", "Event", eventId.toString(), ctx);
             throw new EventSoldOutException(eventId.toString());
         }
 
         Reservation reservation = new Reservation(eventId, caller.getId(), seats);
         reservation = reservationRepository.save(reservation);
 
-        auditService.record(caller.getId(), "RESERVATION_CREATED", "Reservation", reservation.getId().toString(), ip, userAgent);
+        auditService.record(caller.getId(), "RESERVATION_CREATED", "Reservation", reservation.getId().toString(), ctx);
         return reservation;
     }
 
     @Transactional
-    public Reservation confirm(User caller, UUID reservationId, String ip, String userAgent) {
+    public Reservation confirm(User caller, UUID reservationId, RequestContext ctx) {
         Reservation reservation = getOrThrow(reservationId);
         assertReservationOwnerOrAdmin(caller, reservation);
 
@@ -73,12 +74,12 @@ public class ReservationService {
         reservation.setStatus(ReservationStatus.CONFIRMED);
         reservation = reservationRepository.save(reservation);
 
-        auditService.record(caller.getId(), "RESERVATION_CONFIRMED", "Reservation", reservation.getId().toString(), ip, userAgent);
+        auditService.record(caller.getId(), "RESERVATION_CONFIRMED", "Reservation", reservation.getId().toString(), ctx);
         return reservation;
     }
 
     @Transactional
-    public Reservation cancel(User caller, UUID reservationId, String ip, String userAgent) {
+    public Reservation cancel(User caller, UUID reservationId, RequestContext ctx) {
         Reservation reservation = getOrThrow(reservationId);
         assertReservationOwnerOrEventOwnerOrAdmin(caller, reservation);
 
@@ -93,7 +94,7 @@ public class ReservationService {
         reservation.setStatus(ReservationStatus.CANCELLED);
         reservation = reservationRepository.save(reservation);
 
-        auditService.record(caller.getId(), "RESERVATION_CANCELLED", "Reservation", reservation.getId().toString(), ip, userAgent);
+        auditService.record(caller.getId(), "RESERVATION_CANCELLED", "Reservation", reservation.getId().toString(), ctx);
         return reservation;
     }
 

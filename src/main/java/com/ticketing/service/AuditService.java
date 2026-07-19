@@ -1,5 +1,6 @@
 package com.ticketing.service;
 
+import com.ticketing.common.RequestContext;
 import com.ticketing.domain.AuditLog;
 import com.ticketing.repository.AuditLogRepository;
 import org.springframework.stereotype.Service;
@@ -24,7 +25,7 @@ public class AuditService {
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void record(UUID actorId, String action, String resourceType, String resourceId, String ip, String userAgent) {
-        auditLogRepository.save(new AuditLog(actorId, action, resourceType, resourceId, ip, userAgent));
+    public void record(UUID actorId, String action, String resourceType, String resourceId, RequestContext ctx) {
+        auditLogRepository.save(new AuditLog(actorId, action, resourceType, resourceId, ctx.ip(), ctx.userAgent()));
     }
 }

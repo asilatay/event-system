@@ -1,5 +1,6 @@
 package com.ticketing.unit;
 
+import com.ticketing.common.RequestContext;
 import com.ticketing.domain.*;
 import com.ticketing.exception.AccessDeniedOwnershipException;
 import com.ticketing.exception.EventSoldOutException;
@@ -37,6 +38,7 @@ class ReservationServiceTest {
 
     private User customer;
     private Event publishedEvent;
+    private final RequestContext ctx = new RequestContext("127.0.0.1", "junit");
 
     @BeforeEach
     void setUp() {
@@ -58,12 +60,12 @@ class ReservationServiceTest {
             return r;
         });
 
-        Reservation result = reservationService.createReservation(customer, publishedEvent.getId(), 2, "127.0.0.1", "junit");
+        Reservation result = reservationService.createReservation(customer, publishedEvent.getId(), 2, ctx);
 
         assertThat(result.getStatus()).isEqualTo(ReservationStatus.PENDING);
         assertThat(result.getSeats()).isEqualTo(2);
         verify(eventRepository).tryReserveSeats(publishedEvent.getId(), 2);
-        verify(auditService).record(eq(customer.getId()), eq("RESERVATION_CREATED"), eq("Reservation"), any(), any(), any());
+        verify(auditService).record(eq(customer.getId()), eq("RESERVATION_CREATED"), eq("Reservation"), any(), any());
     }
 
     @Test
@@ -72,11 +74,11 @@ class ReservationServiceTest {
         when(eventRepository.tryReserveSeats(publishedEvent.getId(), 5)).thenReturn(0); // no rows updated = sold out
 
         assertThatThrownBy(() ->
-                reservationService.createReservation(customer, publishedEvent.getId(), 5, "127.0.0.1", "junit"))
+                reservationService.createReservation(customer, publishedEvent.getId(), 5, ctx))
                 .isInstanceOf(EventSoldOutException.class);
 
         verify(reservationRepository, never()).save(any());
-        verify(auditService).record(eq(customer.getId()), eq("RESERVATION_REJECTED_SOLD_OUT"), any(), any(), any(), any());
+        verify(auditService).record(eq(customer.getId()), eq("RESERVATION_REJECTED_SOLD_OUT"), any(), any(), any());
     }
 
     @Test
@@ -85,7 +87,7 @@ class ReservationServiceTest {
         when(eventRepository.findById(publishedEvent.getId())).thenReturn(Optional.of(publishedEvent));
 
         assertThatThrownBy(() ->
-                reservationService.createReservation(customer, publishedEvent.getId(), 1, "127.0.0.1", "junit"))
+                reservationService.createReservation(customer, publishedEvent.getId(), 1, ctx))
                 .isInstanceOf(InvalidStateTransitionException.class);
 
         verify(eventRepository, never()).tryReserveSeats(any(), anyInt());
@@ -97,7 +99,7 @@ class ReservationServiceTest {
         setId(reservation, UUID.randomUUID());
         when(reservationRepository.findById(reservation.getId())).thenReturn(Optional.of(reservation));
 
-        assertThatThrownBy(() -> reservationService.confirm(customer, reservation.getId(), "127.0.0.1", "junit"))
+        assertThatThrownBy(() -> reservationService.confirm(customer, reservation.getId(), ctx))
                 .isInstanceOf(AccessDeniedOwnershipException.class);
     }
 
@@ -108,7 +110,7 @@ class ReservationServiceTest {
         reservation.setStatus(ReservationStatus.CONFIRMED);
         when(reservationRepository.findById(reservation.getId())).thenReturn(Optional.of(reservation));
 
-        assertThatThrownBy(() -> reservationService.confirm(customer, reservation.getId(), "127.0.0.1", "junit"))
+        assertThatThrownBy(() -> reservationService.confirm(customer, reservation.getId(), ctx))
                 .isInstanceOf(InvalidStateTransitionException.class);
     }
 
@@ -119,7 +121,7 @@ class ReservationServiceTest {
         when(reservationRepository.findById(reservation.getId())).thenReturn(Optional.of(reservation));
         when(reservationRepository.save(any(Reservation.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        Reservation result = reservationService.cancel(customer, reservation.getId(), "127.0.0.1", "junit");
+        Reservation result = reservationService.cancel(customer, reservation.getId(), ctx);
 
         assertThat(result.getStatus()).isEqualTo(ReservationStatus.CANCELLED);
         verify(eventRepository).releaseSeats(publishedEvent.getId(), 3);

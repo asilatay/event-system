@@ -2,7 +2,6 @@ package com.ticketing.security;
 
 import com.ticketing.domain.User;
 import com.ticketing.repository.UserRepository;
-import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
@@ -32,10 +31,5 @@ public class CurrentUserResolver {
         // user deleted since it was issued is treated as a permissions gap here.
         return userRepository.findByEmail(email)
                 .orElseThrow(() -> new org.springframework.security.access.AccessDeniedException("Unknown user"));
-    }
-
-    public static String clientIp(HttpServletRequest request) {
-        String forwardedFor = request.getHeader("X-Forwarded-For");
-        return forwardedFor != null ? forwardedFor.split(",")[0].trim() : request.getRemoteAddr();
     }
 }

@@ -1,5 +1,6 @@
 package com.ticketing.security;
 
+import com.ticketing.common.RequestUtils;
 import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
 import io.github.bucket4j.Refill;
@@ -99,7 +100,6 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         if (auth != null && auth.isAuthenticated() && !"anonymousUser".equals(auth.getPrincipal())) {
             return "user:" + auth.getName();
         }
-        String forwardedFor = request.getHeader("X-Forwarded-For");
-        return "ip:" + (forwardedFor != null ? forwardedFor.split(",")[0].trim() : request.getRemoteAddr());
+        return "ip:" + RequestUtils.clientIp(request);
     }
 }
