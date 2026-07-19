@@ -4,6 +4,8 @@ import org.springframework.http.HttpStatus;
 
 /** Base class for all domain/application exceptions that map to a known HTTP status. */
 public abstract class ApiException extends RuntimeException {
+    private static final long serialVersionUID = 1L;
+
     private final HttpStatus status;
     private final String errorCode;
 

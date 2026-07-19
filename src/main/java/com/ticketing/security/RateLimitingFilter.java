@@ -3,7 +3,6 @@ package com.ticketing.security;
 import com.ticketing.common.RequestUtils;
 import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
-import io.github.bucket4j.Refill;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -88,7 +87,10 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     }
 
     private Bucket newBucket(int capacity, int refillPerMinute) {
-        Bandwidth limit = Bandwidth.classic(capacity, Refill.greedy(refillPerMinute, Duration.ofMinutes(1)));
+        Bandwidth limit = Bandwidth.builder()
+                .capacity(capacity)
+                .refillGreedy(refillPerMinute, Duration.ofMinutes(1))
+                .build();
         return Bucket.builder().addLimit(limit).build();
     }
 
