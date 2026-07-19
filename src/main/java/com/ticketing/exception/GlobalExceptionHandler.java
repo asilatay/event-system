@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.net.URI;
 import java.time.Instant;
@@ -89,6 +90,17 @@ public class GlobalExceptionHandler {
     public ProblemDetail handleUnreadable(HttpMessageNotReadableException ex) {
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Malformed request body");
         pd.setTitle("MALFORMED_REQUEST");
+        pd.setProperty("timestamp", Instant.now());
+        return pd;
+    }
+
+    // Any request path that matches no controller mapping and no static resource -
+    // without this, DispatcherServlet's NoResourceFoundException fell through to
+    // handleGeneric() as a 500 for what is really just a plain 404.
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ProblemDetail handleNoResourceFound(NoResourceFoundException ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, "No such endpoint");
+        pd.setTitle("RESOURCE_NOT_FOUND");
         pd.setProperty("timestamp", Instant.now());
         return pd;
     }
