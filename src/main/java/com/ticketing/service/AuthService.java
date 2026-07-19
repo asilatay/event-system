@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -51,11 +52,19 @@ public class AuthService {
             throw new DuplicateEmailException(request.email());
         }
 
-        // Unrecognized role names aren't caught by @NotEmpty on the DTO; they fail here
-        // with an IllegalArgumentException, surfaced as a generic 400 by GlobalExceptionHandler.
+        // Unrecognized role names aren't caught by @NotEmpty on the DTO; rejected here
+        // with a client-facing message rather than letting Role.valueOf's
+        // IllegalArgumentException (which names the internal enum's FQCN) leak through.
         Set<Role> roles = request.roles().stream()
                 .map(String::toUpperCase)
-                .map(Role::valueOf)
+                .map(name -> {
+                    try {
+                        return Role.valueOf(name);
+                    } catch (IllegalArgumentException e) {
+                        throw new IllegalArgumentException("Unknown role '" + name
+                                + "'; valid roles are " + Arrays.toString(Role.values()));
+                    }
+                })
                 .collect(Collectors.toSet());
 
         // BCrypt hash only; the plaintext password never touches the DB, logs, or audit trail.

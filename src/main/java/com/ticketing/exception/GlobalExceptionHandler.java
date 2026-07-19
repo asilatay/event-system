@@ -12,6 +12,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.net.URI;
 import java.time.Instant;
@@ -66,6 +67,19 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     public ProblemDetail handleIllegalArgument(IllegalArgumentException ex) {
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+        pd.setTitle("INVALID_ARGUMENT");
+        pd.setProperty("timestamp", Instant.now());
+        return pd;
+    }
+
+    // A path variable or query param that can't be converted to its declared type
+    // (e.g. a non-UUID {id}, an unparseable ?from= date) - without this handler it
+    // falls through to handleGeneric() as a 500, misrepresenting bad client input
+    // as a server fault.
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ProblemDetail handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
+        String detail = "Parameter '" + ex.getName() + "' has an invalid value: " + ex.getValue();
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, detail);
         pd.setTitle("INVALID_ARGUMENT");
         pd.setProperty("timestamp", Instant.now());
         return pd;

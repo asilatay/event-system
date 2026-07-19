@@ -60,6 +60,13 @@ public class EventService {
             throw new InvalidStateTransitionException(
                     "Event was modified concurrently by someone else; reload and retry with the latest version");
         }
+        if (request.endsAt().isBefore(request.startsAt())) {
+            throw new IllegalArgumentException("endsAt must not be before startsAt");
+        }
+        if (request.capacity() < event.getSeatsReserved()) {
+            throw new InvalidStateTransitionException(
+                    "capacity cannot be lower than the " + event.getSeatsReserved() + " seats already reserved");
+        }
 
         event.setTitle(request.title());
         event.setVenue(request.venue());
