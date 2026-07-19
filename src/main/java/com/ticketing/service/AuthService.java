@@ -53,6 +53,12 @@ public class AuthService {
 
     @Transactional
     public User register(RegisterRequest request, String ip, String userAgent) {
+        // Deliberately reveals whether the email is already registered (unlike login,
+        // which never does - see login() below). A silent no-op response here would hide
+        // it, but this app has no email delivery to instead notify the real owner that
+        // someone tried, and would leave a legitimate user with no signal to log in
+        // instead of retrying registration forever. Accepted trade-off, consistent with
+        // most production auth systems (GitHub, Google, etc.) despite OWASP's guidance.
         if (userRepository.existsByEmail(request.email())) {
             throw new DuplicateEmailException(request.email());
         }
