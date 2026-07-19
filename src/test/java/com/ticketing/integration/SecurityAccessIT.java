@@ -1,17 +1,8 @@
 package com.ticketing.integration;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.*;
-import org.springframework.http.client.ClientHttpResponse;
-import org.springframework.test.annotation.DirtiesContext;
-import org.springframework.web.client.ResponseErrorHandler;
-import org.springframework.web.client.RestTemplate;
-import org.springframework.web.util.DefaultUriBuilderFactory;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -24,52 +15,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * events, an ORGANIZER cannot publish another organizer's event, and public
  * discovery requires no authentication at all.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
-class SecurityAccessIT {
-
-    @LocalServerPort
-    private int port;
-
-    private RestTemplate restTemplate;
-
-    private final ObjectMapper objectMapper = new ObjectMapper();
-
-    @BeforeEach
-    void initRestTemplate() {
-        restTemplate = new RestTemplate();
-        // TestRestTemplate (removed in Spring Boot 4.0) never threw on 4xx/5xx so
-        // tests could assert on status codes directly; replicate that here.
-        restTemplate.setErrorHandler(new ResponseErrorHandler() {
-            @Override
-            public boolean hasError(ClientHttpResponse response) {
-                return false;
-            }
-        });
-        restTemplate.setUriTemplateHandler(new DefaultUriBuilderFactory("http://localhost:" + port));
-    }
-
-    private String login(String email, String password) {
-        Map<String, String> body = Map.of("email", email, "password", password);
-        ResponseEntity<String> response = restTemplate.postForEntity("/api/auth/login", body, String.class);
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        try {
-            JsonNode json = objectMapper.readTree(response.getBody());
-            return json.get("accessToken").asText();
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    private HttpHeaders authHeaders(String token) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setBearerAuth(token);
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        return headers;
-    }
+class SecurityAccessIT extends AbstractIntegrationTest {
 
     @Test
-    void customerCannotCreateEvent() {
+    void customerCannotCreateEvent() throws Exception {
         String customerToken = login("customer@ticketing.local", "Customer123!");
 
         Map<String, Object> body = Map.of(
@@ -79,21 +28,17 @@ class SecurityAccessIT {
                 "capacity", 10);
 
         ResponseEntity<String> response = restTemplate.exchange(
-                "/api/events", HttpMethod.POST, new HttpEntity<>(body, authHeaders(customerToken)), String.class);
+                "/api/events", HttpMethod.POST, new HttpEntity<>(body, bearer(customerToken)), String.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
     }
 
     @Test
-    void organizerCannotUpdateAnotherOrganizersEvent() {
+    void organizerCannotUpdateAnotherOrganizersEvent() throws Exception {
         String organizerToken = login("organizer@ticketing.local", "Organizer123!");
 
         // Register a second, unrelated organizer.
-        Map<String, Object> register = Map.of(
-                "email", "second-organizer@ticketing.local",
-                "password", "SecondOrg123!",
-                "roles", java.util.List.of("ORGANIZER"));
-        restTemplate.postForEntity("/api/auth/register", register, String.class);
+        register("second-organizer@ticketing.local", "SecondOrg123!", "ORGANIZER");
         String secondOrganizerToken = login("second-organizer@ticketing.local", "SecondOrg123!");
 
         // First organizer creates an event.
@@ -103,18 +48,12 @@ class SecurityAccessIT {
                 "endsAt", Instant.now().plus(2, ChronoUnit.DAYS).toString(),
                 "capacity", 50);
         ResponseEntity<String> createResponse = restTemplate.exchange(
-                "/api/events", HttpMethod.POST, new HttpEntity<>(eventBody, authHeaders(organizerToken)), String.class);
+                "/api/events", HttpMethod.POST, new HttpEntity<>(eventBody, bearer(organizerToken)), String.class);
         assertThat(createResponse.getStatusCode()).isEqualTo(HttpStatus.CREATED);
 
-        String eventId;
-        long version;
-        try {
-            JsonNode json = objectMapper.readTree(createResponse.getBody());
-            eventId = json.get("id").asText();
-            version = json.get("version").asLong();
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        JsonNode json = objectMapper.readTree(createResponse.getBody());
+        String eventId = json.get("id").asText();
+        long version = json.get("version").asLong();
 
         // Second organizer attempts to update the first organizer's event -> must be forbidden.
         Map<String, Object> updateBody = Map.of(
@@ -125,7 +64,7 @@ class SecurityAccessIT {
                 "version", version);
         ResponseEntity<String> updateResponse = restTemplate.exchange(
                 "/api/events/" + eventId, HttpMethod.PUT,
-                new HttpEntity<>(updateBody, authHeaders(secondOrganizerToken)), String.class);
+                new HttpEntity<>(updateBody, bearer(secondOrganizerToken)), String.class);
 
         assertThat(updateResponse.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
     }
@@ -143,12 +82,12 @@ class SecurityAccessIT {
     }
 
     @Test
-    void protectedEndpointRejectsTamperedToken() {
+    void protectedEndpointRejectsTamperedToken() throws Exception {
         String token = login("customer@ticketing.local", "Customer123!");
         String tampered = token.substring(0, token.length() - 3) + "xyz";
 
         ResponseEntity<String> response = restTemplate.exchange(
-                "/api/events", HttpMethod.GET, new HttpEntity<>(authHeaders(tampered)), String.class);
+                "/api/events", HttpMethod.GET, new HttpEntity<>(bearer(tampered)), String.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }

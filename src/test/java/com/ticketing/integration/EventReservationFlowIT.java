@@ -1,17 +1,8 @@
 package com.ticketing.integration;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.*;
-import org.springframework.http.client.ClientHttpResponse;
-import org.springframework.test.annotation.DirtiesContext;
-import org.springframework.web.client.ResponseErrorHandler;
-import org.springframework.web.client.RestTemplate;
-import org.springframework.web.util.DefaultUriBuilderFactory;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -21,30 +12,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** End-to-end: register -> login -> create draft -> publish -> reserve -> confirm -> cancel. */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
-class EventReservationFlowIT {
-
-    @LocalServerPort
-    private int port;
-
-    private RestTemplate restTemplate;
-
-    private final ObjectMapper objectMapper = new ObjectMapper();
-
-    @BeforeEach
-    void initRestTemplate() {
-        restTemplate = new RestTemplate();
-        // TestRestTemplate (removed in Spring Boot 4.0) never threw on 4xx/5xx so
-        // tests could assert on status codes directly; replicate that here.
-        restTemplate.setErrorHandler(new ResponseErrorHandler() {
-            @Override
-            public boolean hasError(ClientHttpResponse response) {
-                return false;
-            }
-        });
-        restTemplate.setUriTemplateHandler(new DefaultUriBuilderFactory("http://localhost:" + port));
-    }
+class EventReservationFlowIT extends AbstractIntegrationTest {
 
     @Test
     void fullHappyPathFlow() throws Exception {
@@ -136,25 +104,5 @@ class EventReservationFlowIT {
             if (e.get("id").asText().equals(eventId)) return true;
         }
         return false;
-    }
-
-    private HttpHeaders bearer(String token) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setBearerAuth(token);
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        return headers;
-    }
-
-    private void register(String email, String password, String role) {
-        Map<String, Object> body = Map.of("email", email, "password", password, "roles", java.util.List.of(role));
-        ResponseEntity<String> response = restTemplate.postForEntity("/api/auth/register", body, String.class);
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-    }
-
-    private String login(String email, String password) throws Exception {
-        Map<String, String> body = Map.of("email", email, "password", password);
-        ResponseEntity<String> response = restTemplate.postForEntity("/api/auth/login", body, String.class);
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        return objectMapper.readTree(response.getBody()).get("accessToken").asText();
     }
 }
