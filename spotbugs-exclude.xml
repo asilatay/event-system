@@ -1,0 +1,30 @@
+<FindBugsFilter>
+
+    <!-- Constructor-injected Spring collaborators (beans, framework objects) are not
+         externally-mutable "data" the EI_EXPOSE_REP2 rule is meant to catch - storing
+         a reference to another Spring-managed bean via constructor injection is the
+         whole point of DI, not a malicious-code exposure risk. -->
+    <Match>
+        <Or>
+            <Class name="com.ticketing.security.SecurityConfig"/>
+            <Class name="com.ticketing.security.RestAuthenticationEntryPoint"/>
+            <Class name="com.ticketing.service.IdempotencyService"/>
+        </Or>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+    </Match>
+
+    <!-- CT_CONSTRUCTOR_THROW's suggested fix (making the class final) would break
+         Spring's CGLIB-based proxying of @Transactional methods on these two classes,
+         which requires the class to be non-final and subclassable. The theoretical
+         finalizer attack this rule guards against does not apply here regardless:
+         neither class overrides finalize(), and both are Spring-managed singletons
+         never instantiated by untrusted code. -->
+    <Match>
+        <Or>
+            <Class name="com.ticketing.security.JwtService"/>
+            <Class name="com.ticketing.service.AuthService"/>
+        </Or>
+        <Bug pattern="CT_CONSTRUCTOR_THROW"/>
+    </Match>
+
+</FindBugsFilter>

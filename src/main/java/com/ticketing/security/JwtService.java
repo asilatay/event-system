@@ -38,6 +38,7 @@ import java.util.stream.Collectors;
 public class JwtService {
 
     private static final Logger log = LoggerFactory.getLogger(JwtService.class);
+    private static final SecureRandom RANDOM = new SecureRandom();
 
     private final SecretKey signingKey;
     private final long accessTokenTtlMinutes;
@@ -55,7 +56,7 @@ public class JwtService {
         // fixed secret ever exists to leak. A real deployment must set JWT_SECRET.
         if (secret == null || secret.isBlank()) {
             byte[] randomKeyBytes = new byte[64];
-            new SecureRandom().nextBytes(randomKeyBytes);
+            RANDOM.nextBytes(randomKeyBytes);
             this.signingKey = Keys.hmacShaKeyFor(randomKeyBytes);
             log.warn("app.jwt.secret (JWT_SECRET) is not set - generated a random signing key "
                     + "for this run. Tokens will not survive a restart. Set JWT_SECRET explicitly "

@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.Instant;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
@@ -31,10 +32,15 @@ public class User {
 
     // EAGER is required: CustomUserDetailsService.loadUserByUsername reads this
     // collection with no open transaction; LAZY would throw on session close.
+    // Getter/setter hand-written below (not Lombok) to defensively copy: Hibernate
+    // manages this field directly via reflection regardless, so wrapping/copying in
+    // the accessors only affects callers, not persistence.
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "user_roles", joinColumns = @JoinColumn(name = "user_id"))
     @Enumerated(EnumType.STRING)
     @Column(name = "role")
+    @Getter(AccessLevel.NONE)
+    @Setter(AccessLevel.NONE)
     private Set<Role> roles = new HashSet<>();
 
     @Column(nullable = false, updatable = false)
@@ -45,6 +51,14 @@ public class User {
     public User(String email, String passwordHash, Set<Role> roles) {
         this.email = email;
         this.passwordHash = passwordHash;
-        this.roles = roles;
+        this.roles = new HashSet<>(roles);
+    }
+
+    public Set<Role> getRoles() {
+        return Collections.unmodifiableSet(roles);
+    }
+
+    public void setRoles(Set<Role> roles) {
+        this.roles = new HashSet<>(roles);
     }
 }
