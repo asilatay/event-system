@@ -33,8 +33,8 @@ public class IdempotencyTransactionalOps {
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public IdempotencyKey beginRecord(String key, String endpoint, String requestHash) {
-        IdempotencyKey record = new IdempotencyKey(key, endpoint, requestHash,
+    public IdempotencyKey beginRecord(String key, String endpoint, UUID callerId, String requestHash) {
+        IdempotencyKey record = new IdempotencyKey(key, endpoint, callerId, requestHash,
                 Instant.now().plus(ttlHours, ChronoUnit.HOURS));
         return repository.saveAndFlush(record); // flush forces the unique-constraint check now
     }

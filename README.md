@@ -166,13 +166,20 @@ sold-out rejection is exactly the kind of event a security/ops audit trail
 exists to capture.
 
 ### ADR-06 — Idempotency: insert-first, not check-then-act
-`IdempotencyKey` has a unique constraint on `(key_value, endpoint)`. The
-service tries to **insert** a new `IN_PROGRESS` row in its own committed
+`IdempotencyKey` has a unique constraint on `(key_value, endpoint, caller_id)`.
+The service tries to **insert** a new `IN_PROGRESS` row in its own committed
 transaction before running the business action; if a concurrent request
 raced it, the insert fails on the unique constraint and that request instead
 loads and inspects the row that won. This avoids the classic idempotency bug
 where two simultaneous retries both pass a "does this key exist?" check
 before either has written anything.
+
+`caller_id` is part of the constraint, not an afterthought: without it, two
+*different* users who happened to submit the same Idempotency-Key with the
+same request body (a predictable client-side key generator, or a deliberate
+probe) would collide on one row, and the second caller would be handed the
+first caller's stored response — including their reservation id. Scoping by
+caller closes that off; each caller's retries only ever match their own rows.
 - Same key + same request hash + `COMPLETED` → replay the stored response,
   don't re-run the business logic.
 - Same key + **different** request hash → `409` (key reuse with a different

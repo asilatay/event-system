@@ -61,6 +61,7 @@ public class ReservationController {
         ReservationResponse response = idempotencyService.execute(
                 idempotencyKey,
                 "POST /api/events/" + id + "/reservations",
+                caller.getId(),
                 request,
                 ReservationResponse.class,
                 () -> ReservationResponse.from(

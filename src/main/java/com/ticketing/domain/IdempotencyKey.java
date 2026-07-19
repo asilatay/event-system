@@ -11,7 +11,7 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "idempotency_key",
-        uniqueConstraints = @UniqueConstraint(columnNames = {"key_value", "endpoint"}))
+        uniqueConstraints = @UniqueConstraint(columnNames = {"key_value", "endpoint", "caller_id"}))
 @Getter
 @Setter
 @NoArgsConstructor(access = AccessLevel.PUBLIC)
@@ -28,6 +28,18 @@ public class IdempotencyKey {
     /** e.g. "POST /api/events/{id}/reservations" — same key may be reused across different endpoints. */
     @Column(nullable = false)
     private String endpoint;
+
+    /**
+     * The authenticated caller who supplied this key, included in the unique
+     * constraint alongside (key, endpoint). Without this, two different users
+     * who happen to submit the same Idempotency-Key with the same request body
+     * (a guessed/predictable key, a buggy client library, or a deliberate probe)
+     * would collide on the same row: the second caller's request would be
+     * treated as a replay of the first caller's, and receive the first
+     * caller's response - including their reservation id and internal user id.
+     */
+    @Column(name = "caller_id", nullable = false)
+    private UUID callerId;
 
     /** SHA-256 of the normalized request body, to detect key-reuse-with-different-payload. */
     @Column(nullable = false)
@@ -51,9 +63,10 @@ public class IdempotencyKey {
     @Column(nullable = false)
     private Instant expiresAt;
 
-    public IdempotencyKey(String key, String endpoint, String requestHash, Instant expiresAt) {
+    public IdempotencyKey(String key, String endpoint, UUID callerId, String requestHash, Instant expiresAt) {
         this.key = key;
         this.endpoint = endpoint;
+        this.callerId = callerId;
         this.requestHash = requestHash;
         this.expiresAt = expiresAt;
     }

@@ -10,13 +10,17 @@ import org.springframework.stereotype.Service;
 
 import java.security.MessageDigest;
 import java.util.Base64;
+import java.util.UUID;
 import java.util.function.Supplier;
 
 /**
  * ADR-06 - Idempotency implementation.
  *
  * The race-safety comes from relying on the DB unique constraint on
- * (key_value, endpoint) rather than a "check-then-insert" in application code:
+ * (key_value, endpoint, caller_id) rather than a "check-then-insert" in application
+ * code. caller_id is part of the constraint (not just key+endpoint) so that two
+ * different callers who happen to submit the same key with the same body never
+ * collide on one row and get handed each other's response:
  *
  *  1. beginRecord() tries to INSERT a new row with status=IN_PROGRESS in its
  *     OWN committed transaction (REQUIRES_NEW, in IdempotencyTransactionalOps),
@@ -48,7 +52,7 @@ public class IdempotencyService {
         this.objectMapper = objectMapper;
     }
 
-    public <T> T execute(String idempotencyKey, String endpoint, Object requestPayload,
+    public <T> T execute(String idempotencyKey, String endpoint, UUID callerId, Object requestPayload,
                           Class<T> responseType, Supplier<T> action) {
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
             throw new IdempotencyKeyRequiredException();
@@ -57,9 +61,9 @@ public class IdempotencyService {
         String requestHash = hash(requestPayload);
         IdempotencyKey record;
         try {
-            record = txOps.beginRecord(idempotencyKey, endpoint, requestHash);
+            record = txOps.beginRecord(idempotencyKey, endpoint, callerId, requestHash);
         } catch (DataIntegrityViolationException raceLost) {
-            return handleExisting(idempotencyKey, endpoint, requestHash, responseType);
+            return handleExisting(idempotencyKey, endpoint, callerId, requestHash, responseType);
         }
 
         try {
@@ -72,8 +76,12 @@ public class IdempotencyService {
         }
     }
 
-    private <T> T handleExisting(String key, String endpoint, String requestHash, Class<T> responseType) {
-        IdempotencyKey existing = repository.findByKeyAndEndpoint(key, endpoint)
+    private <T> T handleExisting(String key, String endpoint, UUID callerId, String requestHash, Class<T> responseType) {
+        // Scoped to (key, endpoint, callerId): a different caller reusing the same key
+        // and body finds no row here (their own beginRecord() would have inserted a
+        // distinct one instead of colliding), so they can never be handed this caller's
+        // stored response.
+        IdempotencyKey existing = repository.findByKeyAndEndpointAndCallerId(key, endpoint, callerId)
                 .orElseThrow(() -> new IdempotencyConflictException(
                         "Idempotency-Key conflict could not be resolved; please retry"));
 
