@@ -121,21 +121,23 @@ public class AuthService {
         }
 
         String hash = JwtService.sha256(refreshTokenJwt);
-        RefreshToken stored = refreshTokenRepository.findByTokenHash(hash)
-                .orElseThrow(InvalidRefreshTokenException::new);
 
-        if (stored.isRevoked() || stored.getExpiresAt().isBefore(Instant.now())) {
+        // Rotation via one atomic conditional UPDATE (ADR-02 pattern), not a
+        // read-then-write: two concurrent requests with the same refresh token
+        // (the legitimate client racing an attacker replaying a stolen token, or
+        // just a double-submit) must not both observe revoked=false and both go on
+        // to mint a valid session. Only one caller can flip this row from unrevoked
+        // to revoked; the other gets 0 affected rows here and is rejected outright,
+        // instead of both succeeding with two independent token pairs.
+        int revokedNow = refreshTokenRepository.tryRevoke(hash, Instant.now());
+        if (revokedNow == 0) {
             throw new InvalidRefreshTokenException();
         }
 
+        RefreshToken stored = refreshTokenRepository.findByTokenHash(hash)
+                .orElseThrow(InvalidRefreshTokenException::new);
         User user = userRepository.findById(stored.getUserId())
                 .orElseThrow(InvalidRefreshTokenException::new);
-
-        // Rotation: the old refresh token is revoked as soon as it is used once.
-        // If a stolen refresh token is replayed after the legitimate client already
-        // rotated it, this revocation causes the replay to fail immediately.
-        stored.setRevoked(true);
-        refreshTokenRepository.save(stored);
 
         AuthResponse tokens = issueTokenPair(user);
         auditService.record(user.getId(), "TOKEN_REFRESHED", "User", user.getId().toString(), ip, userAgent);
